@@ -1,0 +1,15 @@
+1:   { 
+2:     id: 'opt_porthole_d400', 
+3:     name: 'Р�Р»Р»СЋРјРёРЅР°С‚РѕСЂ D400 (РњР”Р¤)', 
+4:     price: 6195, 
+5:     category: 'option', 
+6:     description: 'РљСЂСѓРіР»РѕРµ РѕРєРЅРѕ РґРёР°РјРµС‚СЂРѕРј 400РјРј СЃ РѕР±РєР»Р°РґРєРѕР№ РёР· РњР”Р¤.', 
+7:     imageUrl: 'https://images.unsplash.com/photo-1549103723-5d5543c8d372?auto=format&fit=crop&q=80&w=800' 
+8:   },
+9:   { 
+10:     id: 'opt_porthole_inox', 
+11:     name: 'Р�Р»Р»СЋРјРёРЅР°С‚РѕСЂ D350 (INOX)', 
+12:     price: 17389, 
+13:     category: 'option', 
+14:     description: 'РљСЂСѓРіР»РѕРµ РѕРєРЅРѕ СЃ СЂР°РјРєРѕР№ РёР· РЅРµСЂР¶Р°РІРµСЋС‰РµР№ СЃС‚Р°Р»Рё. Р”Р»СЏ С‡РёСЃС‚С‹С… РїРѕРјРµС‰РµРЅРёР№.', 
+15:     imageUrl: 'https://images.unsplash.com/photo-1549103723-5d5543c8d372?auto=format&fit=crop&q=80&w=800' 
