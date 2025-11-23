@@ -1630,22 +1630,40 @@ const App: React.FC = () => {
             </table>
           </div>
 
-          <div className="flex justify-between items-center border-t border-white/20 pt-6">
-             <button 
-                type="button"
-                onClick={handleRecalculatePrices}
-                className="text-xs text-white/40 hover:text-dorren-lightBlue flex items-center gap-2 transition-colors uppercase tracking-widest"
-             >
-                <RefreshCw size={14} /> Пересчитать цены по прайсу
-             </button>
-
+          <div className="flex justify-end items-center border-t border-white/20 pt-6">
              <div className="text-right">
                <span className="text-sm uppercase tracking-widest text-white/60 mr-4">Итого к оплате:</span>
                <span className="text-3xl font-light text-dorren-lightBlue font-mono">{formatPrice(projectTotal)} ₽</span>
              </div>
           </div>
 
-          {/* Блок данных проекта удалён */}
+          <div className="mt-6 flex flex-col md:flex-row gap-4">
+            <Button 
+              className="flex-1 transition-all duration-300 bg-dorren-darkBlue text-white hover:bg-dorren-lightBlue hover:text-dorren-black"
+              onClick={handleSaveProjectToArchive}
+              disabled={projectItems.length === 0}
+            >
+              <Save size={18} className="mr-2" />
+              Сохранить проект
+            </Button>
+            <Button 
+              className="flex-1 transition-all duration-300"
+              onClick={handleDownloadPDF}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <div className="flex items-center">
+                  <Loader2 className="animate-spin mr-2" size={18} />
+                  Генерация...
+                </div>
+              ) : (
+                <div className="flex items-center">
+                  <FileDown className="mr-2" size={18} />
+                  Сформировать КП
+                </div>
+              )}
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>
