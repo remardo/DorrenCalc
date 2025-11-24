@@ -183,7 +183,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_id", ["id"])
+    .index("by_productId", ["id"])
     .index("by_category", ["category"])
     .index("by_doorType", ["doorType"])
     .index("by_isActive", ["isActive"]),
