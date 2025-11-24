@@ -162,4 +162,29 @@ export default defineSchema({
     }),
     createdAt: v.number(),
   }).index("by_createdAt", ["createdAt"]),
+
+  // Прайс-лист продуктов
+  products: defineTable({
+    id: v.string(), // уникальный ID продукта (например, 'l1_ral_base')
+    name: v.string(),
+    price: v.number(),
+    category: v.union(
+      v.literal("leaf"),
+      v.literal("frame"),
+      v.literal("option"),
+      v.literal("hardware"),
+      v.literal("accessory")
+    ),
+    description: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    compatibleWith: v.optional(v.array(v.string())), // ['single', 'one_half', 'double']
+    doorType: v.optional(v.string()), // для полотен и коробов: 'single', 'one_half', 'double'
+    isActive: v.boolean(), // активен ли продукт
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_id", ["id"])
+    .index("by_category", ["category"])
+    .index("by_doorType", ["doorType"])
+    .index("by_isActive", ["isActive"]),
 });

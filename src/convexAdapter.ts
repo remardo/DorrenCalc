@@ -1,144 +1,90 @@
-import { useEffect } from "react";
-import {
-  useSaveProject,
-  useGetProjects,
-  useDeleteProject,
-  useSaveTemplate,
-  useGetTemplates,
-  useDeleteTemplate,
-  useUpdateTemplate,
-  useSaveDraft,
-  useGetDraft,
-  useDeleteDraft,
-} from "../src/hooks";
+// Простые хуки для работы с Convex
+// Используйте эти хуки напрямую в компонентах React
 
-// Адаптер для работы с данными через Convex
-export class ConvexDataAdapter {
-  private saveProjectMutation: any;
-  private deleteProjectMutation: any;
-  private saveTemplateMutation: any;
-  private deleteTemplateMutation: any;
-  private updateTemplateMutation: any;
-  private saveDraftMutation: any;
-  private deleteDraftMutation: any;
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+import { Id } from "../convex/_generated/dataModel";
 
-  constructor() {
-    this.saveProjectMutation = useSaveProject();
-    this.deleteProjectMutation = useDeleteProject();
-    this.saveTemplateMutation = useSaveTemplate();
-    this.deleteTemplateMutation = useDeleteTemplate();
-    this.updateTemplateMutation = useUpdateTemplate();
-    this.saveDraftMutation = useSaveDraft();
-    this.deleteDraftMutation = useDeleteDraft();
-  }
+// === ПРОЕКТЫ ===
+export function useProjects() {
+  const projects = useQuery(api.functions.getProjects, {});
+  const saveProject = useMutation(api.functions.saveProject);
+  const deleteProject = useMutation(api.functions.deleteProject);
 
-  // Работа с проектами
-  async saveProject(projectData: any): Promise<string> {
-    const result = await this.saveProjectMutation(projectData);
-    return result._id;
-  }
-
-  async getProjects(): Promise<any[]> {
-    // Этот метод будет переопределен компонентом, который использует useGetProjects
-    return [];
-  }
-
-  async deleteProject(projectId: string): Promise<void> {
-    await this.deleteProjectMutation({ projectId });
-  }
-
-  // Работа с шаблонами
-  async saveTemplate(templateData: any): Promise<string> {
-    const result = await this.saveTemplateMutation(templateData);
-    return result._id;
-  }
-
-  async getTemplates(): Promise<any[]> {
-    // Этот метод будет переопределен компонентом, который использует useGetTemplates
-    return [];
-  }
-
-  async deleteTemplate(templateId: string): Promise<void> {
-    await this.deleteTemplateMutation({ templateId });
-  }
-
-  async updateTemplate(templateId: string, name: string): Promise<void> {
-    await this.updateTemplateMutation({ templateId, name });
-  }
-
-  // Работа с черновиками
-  async saveDraft(config: any): Promise<void> {
-    await this.saveDraftMutation({ config });
-  }
-
-  async getDraft(): Promise<any> {
-    // Этот метод будет переопределен компонентом, который использует useGetDraft
-    return null;
-  }
-
-  async deleteDraft(): Promise<void> {
-    await this.deleteDraftMutation({});
-  }
-}
-
-// Хук для интеграции Convex с компонентами
-export function useConvexIntegration() {
-  const { data: projects, refetch: refetchProjects } = useGetProjects();
-  const { data: templates, refetch: refetchTemplates } = useGetTemplates();
-  const { data: draft, refetch: refetchDraft } = useGetDraft();
-
-  // Создаем адаптер с данными
-  const adapter: ConvexDataAdapter = {
-    async saveProject(projectData: any): Promise<string> {
-      const result = await useSaveProject()(projectData);
-      refetchProjects();
-      return result._id;
-    },
-
-    async getProjects(): Promise<any[]> {
-      return projects || [];
-    },
-
-    async deleteProject(projectId: string): Promise<void> {
-      await useDeleteProject()({ projectId });
-      refetchProjects();
-    },
-
-    async saveTemplate(templateData: any): Promise<string> {
-      const result = await useSaveTemplate()(templateData);
-      refetchTemplates();
-      return result._id;
-    },
-
-    async getTemplates(): Promise<any[]> {
-      return templates || [];
-    },
-
-    async deleteTemplate(templateId: string): Promise<void> {
-      await useDeleteTemplate()({ templateId });
-      refetchTemplates();
-    },
-
-    async updateTemplate(templateId: string, name: string): Promise<void> {
-      await useUpdateTemplate()({ templateId, name });
-      refetchTemplates();
-    },
-
-    async saveDraft(config: any): Promise<void> {
-      await useSaveDraft()({ config });
-    },
-
-    async getDraft(): Promise<any> {
-      return draft || null;
-    },
-
-    async deleteDraft(): Promise<void> {
-      await useDeleteDraft()({});
-      refetchDraft();
-    },
+  return {
+    projects: projects || [],
+    isLoading: projects === undefined,
+    saveProject,
+    deleteProject: (projectId: Id<"projects">) => deleteProject({ projectId }),
   };
-
-  return adapter;
 }
 
-export default ConvexDataAdapter;
+// === ШАБЛОНЫ ===
+export function useTemplates() {
+  const templates = useQuery(api.functions.getTemplates, {});
+  const saveTemplate = useMutation(api.functions.saveTemplate);
+  const deleteTemplate = useMutation(api.functions.deleteTemplate);
+  const updateTemplate = useMutation(api.functions.updateTemplate);
+
+  return {
+    templates: templates || [],
+    isLoading: templates === undefined,
+    saveTemplate,
+    deleteTemplate: (templateId: Id<"templates">) => deleteTemplate({ templateId }),
+    updateTemplate: (templateId: Id<"templates">, name: string) => updateTemplate({ templateId, name }),
+  };
+}
+
+// === ЧЕРНОВИКИ ===
+export function useDraft() {
+  const draft = useQuery(api.functions.getDraft, {});
+  const saveDraft = useMutation(api.functions.saveDraft);
+  const deleteDraft = useMutation(api.functions.deleteDraft);
+
+  return {
+    draft: draft || null,
+    isLoading: draft === undefined,
+    saveDraft: (config: any) => saveDraft({ config }),
+    deleteDraft: () => deleteDraft({}),
+  };
+}
+
+// === ПРОДУКТЫ (ПРАЙС-ЛИСТ) ===
+export function useProducts() {
+  const products = useQuery(api.functions.getProducts, {});
+  const activeProducts = useQuery(api.functions.getActiveProducts, {});
+  const upsertProduct = useMutation(api.functions.upsertProduct);
+  const updateProductPrice = useMutation(api.functions.updateProductPrice);
+  const deleteProduct = useMutation(api.functions.deleteProduct);
+  const deactivateProduct = useMutation(api.functions.deactivateProduct);
+  const bulkUpsertProducts = useMutation(api.functions.bulkUpsertProducts);
+
+  return {
+    products: products || [],
+    activeProducts: activeProducts || [],
+    isLoading: products === undefined,
+    upsertProduct,
+    updateProductPrice: (productId: string, price: number) => updateProductPrice({ productId, price }),
+    deleteProduct: (productId: Id<"products">) => deleteProduct({ productId }),
+    deactivateProduct: (productId: string) => deactivateProduct({ productId }),
+    bulkUpsertProducts: (productsData: any[]) => bulkUpsertProducts({ products: productsData }),
+  };
+}
+
+// Хук для получения продуктов по категории
+export function useProductsByCategory(category: "leaf" | "frame" | "option" | "hardware" | "accessory") {
+  const products = useQuery(api.functions.getProductsByCategory, { category });
+  return {
+    products: products || [],
+    isLoading: products === undefined,
+  };
+}
+
+// Хук для получения продуктов по типу двери
+export function useProductsByDoorType(doorType: string) {
+  const products = useQuery(api.functions.getProductsByDoorType, { doorType });
+  return {
+    products: products || [],
+    isLoading: products === undefined,
+  };
+}

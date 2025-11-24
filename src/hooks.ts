@@ -43,3 +43,40 @@ export const useGetDraft = () => {
 export const useDeleteDraft = () => {
   return useMutation(api.functions.deleteDraft);
 };
+
+// Хуки для работы с продуктами (прайс-лист)
+export const useUpsertProduct = () => {
+  return useMutation(api.functions.upsertProduct);
+};
+
+export const useGetProducts = () => {
+  return useQuery(api.functions.getProducts, {});
+};
+
+export const useGetProductsByCategory = (category: "leaf" | "frame" | "option" | "hardware" | "accessory") => {
+  return useQuery(api.functions.getProductsByCategory, { category });
+};
+
+export const useGetProductsByDoorType = (doorType: string) => {
+  return useQuery(api.functions.getProductsByDoorType, { doorType });
+};
+
+export const useGetActiveProducts = () => {
+  return useQuery(api.functions.getActiveProducts, {});
+};
+
+export const useUpdateProductPrice = () => {
+  return useMutation(api.functions.updateProductPrice);
+};
+
+export const useDeleteProduct = () => {
+  return useMutation(api.functions.deleteProduct);
+};
+
+export const useDeactivateProduct = () => {
+  return useMutation(api.functions.deactivateProduct);
+};
+
+export const useBulkUpsertProducts = () => {
+  return useMutation(api.functions.bulkUpsertProducts);
+};

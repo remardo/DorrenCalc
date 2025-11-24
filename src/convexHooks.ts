@@ -42,3 +42,24 @@ export function useConvexDrafts() {
     deleteDraft,
   };
 }
+
+// Хуки для работы с продуктами (прайс-лист)
+export function useConvexProducts() {
+  const upsertProduct = useMutation(api.functions.upsertProduct);
+  const getProducts = useQuery(api.functions.getProducts, {});
+  const getActiveProducts = useQuery(api.functions.getActiveProducts, {});
+  const updateProductPrice = useMutation(api.functions.updateProductPrice);
+  const deleteProduct = useMutation(api.functions.deleteProduct);
+  const deactivateProduct = useMutation(api.functions.deactivateProduct);
+  const bulkUpsertProducts = useMutation(api.functions.bulkUpsertProducts);
+
+  return {
+    upsertProduct,
+    products: getProducts || [],
+    activeProducts: getActiveProducts || [],
+    updateProductPrice,
+    deleteProduct,
+    deactivateProduct,
+    bulkUpsertProducts,
+  };
+}

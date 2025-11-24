@@ -270,3 +270,230 @@ export const deleteDraft = mutation({
     }
   },
 });
+
+// === ПРАЙС-ЛИСТ (ПРОДУКТЫ) ===
+
+// Добавить или обновить продукт
+export const upsertProduct = mutation({
+  args: {
+    id: v.string(),
+    name: v.string(),
+    price: v.number(),
+    category: v.union(
+      v.literal("leaf"),
+      v.literal("frame"),
+      v.literal("option"),
+      v.literal("hardware"),
+      v.literal("accessory")
+    ),
+    description: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    compatibleWith: v.optional(v.array(v.string())),
+    doorType: v.optional(v.string()),
+    isActive: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    
+    // Проверяем, существует ли продукт с таким id
+    const allProducts = await ctx.db.query("products").collect();
+    const existing = allProducts.find(p => p.id === args.id);
+    
+    if (existing) {
+      // Обновляем существующий продукт
+      await ctx.db.patch(existing._id, {
+        name: args.name,
+        price: args.price,
+        category: args.category,
+        description: args.description,
+        imageUrl: args.imageUrl,
+        compatibleWith: args.compatibleWith,
+        doorType: args.doorType,
+        isActive: args.isActive ?? true,
+        updatedAt: now,
+      });
+      return existing._id;
+    } else {
+      // Создаем новый продукт
+      return await ctx.db.insert("products", {
+        id: args.id,
+        name: args.name,
+        price: args.price,
+        category: args.category,
+        description: args.description,
+        imageUrl: args.imageUrl,
+        compatibleWith: args.compatibleWith,
+        doorType: args.doorType,
+        isActive: args.isActive ?? true,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+// Получить все продукты
+export const getProducts = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("products")
+      .collect();
+  },
+});
+
+// Получить продукты по категории
+export const getProductsByCategory = query({
+  args: {
+    category: v.union(
+      v.literal("leaf"),
+      v.literal("frame"),
+      v.literal("option"),
+      v.literal("hardware"),
+      v.literal("accessory")
+    ),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("products")
+      .withIndex("by_category", (q) => q.eq("category", args.category))
+      .collect();
+  },
+});
+
+// Получить продукты по типу двери (для полотен и коробов)
+export const getProductsByDoorType = query({
+  args: {
+    doorType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("products")
+      .withIndex("by_doorType", (q) => q.eq("doorType", args.doorType))
+      .collect();
+  },
+});
+
+// Получить только активные продукты
+export const getActiveProducts = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("products")
+      .withIndex("by_isActive", (q) => q.eq("isActive", true))
+      .collect();
+  },
+});
+
+// Обновить цену продукта
+export const updateProductPrice = mutation({
+  args: {
+    productId: v.string(),
+    price: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const allProducts = await ctx.db.query("products").collect();
+    const product = allProducts.find(p => p.id === args.productId);
+    
+    if (product) {
+      await ctx.db.patch(product._id, {
+        price: args.price,
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+// Удалить продукт
+export const deleteProduct = mutation({
+  args: {
+    productId: v.id("products"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.productId);
+  },
+});
+
+// Деактивировать продукт (мягкое удаление)
+export const deactivateProduct = mutation({
+  args: {
+    productId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const allProducts = await ctx.db.query("products").collect();
+    const product = allProducts.find(p => p.id === args.productId);
+    
+    if (product) {
+      await ctx.db.patch(product._id, {
+        isActive: false,
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+// Массовое добавление продуктов (для импорта прайс-листа)
+export const bulkUpsertProducts = mutation({
+  args: {
+    products: v.array(v.object({
+      id: v.string(),
+      name: v.string(),
+      price: v.number(),
+      category: v.union(
+        v.literal("leaf"),
+        v.literal("frame"),
+        v.literal("option"),
+        v.literal("hardware"),
+        v.literal("accessory")
+      ),
+      description: v.optional(v.string()),
+      imageUrl: v.optional(v.string()),
+      compatibleWith: v.optional(v.array(v.string())),
+      doorType: v.optional(v.string()),
+      isActive: v.optional(v.boolean()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const results = [];
+    
+    // Получаем все существующие продукты один раз
+    const allProducts = await ctx.db.query("products").collect();
+    
+    for (const product of args.products) {
+      const existing = allProducts.find(p => p.id === product.id);
+      
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          name: product.name,
+          price: product.price,
+          category: product.category,
+          description: product.description,
+          imageUrl: product.imageUrl,
+          compatibleWith: product.compatibleWith,
+          doorType: product.doorType,
+          isActive: product.isActive ?? true,
+          updatedAt: now,
+        });
+        results.push({ id: product.id, action: "updated" });
+      } else {
+        await ctx.db.insert("products", {
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          category: product.category,
+          description: product.description,
+          imageUrl: product.imageUrl,
+          compatibleWith: product.compatibleWith,
+          doorType: product.doorType,
+          isActive: product.isActive ?? true,
+          createdAt: now,
+          updatedAt: now,
+        });
+        results.push({ id: product.id, action: "created" });
+      }
+    }
+    
+    return results;
+  },
+});
