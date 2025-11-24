@@ -18,7 +18,8 @@ import { generatePDF } from './pdfGenerator';
 import { 
   useProjects, 
   useTemplates as useTemplatesHook, 
-  useDraft as useDraftHook 
+  useDraft as useDraftHook,
+  useProducts as useProductsHook
 } from './src/convexAdapter';
 import { Id } from './convex/_generated/dataModel';
 
@@ -69,6 +70,13 @@ const App: React.FC = () => {
     saveDraft: convexSaveDraft, 
     deleteDraft: convexDeleteDraft 
   } = useDraftHook();
+  
+  const {
+    products: convexProducts,
+    bulkUpsertProducts: convexBulkUpsertProducts,
+  } = useProductsHook();
+
+  const hasSeededProductsRef = useRef(false);
   
   // --- Catalog State (Initialized from data.ts but mutable) ---
   const [catalogLeafs, setCatalogLeafs] = useState(LEAFS);
@@ -244,6 +252,86 @@ const App: React.FC = () => {
   }, [editorCategory, editorDoorType, isPriceEditorOpen]);
 
   // --- Helpers ---
+  const buildSeedProducts = () => {
+    const seed: any[] = [];
+    // Leafs and frames are keyed by door type
+    (Object.keys(LEAFS) as DoorType[]).forEach(doorType => {
+      LEAFS[doorType].forEach(item => seed.push({ ...item, doorType, isActive: true }));
+    });
+    (Object.keys(FRAMES) as DoorType[]).forEach(doorType => {
+      FRAMES[doorType].forEach(item => seed.push({ ...item, doorType, isActive: true }));
+    });
+    // Options / hardware / accessories are flat arrays
+    OPTIONS.forEach(item => seed.push({ ...item, isActive: true }));
+    HARDWARE.forEach(item => seed.push({ ...item, isActive: true }));
+    ACCESSORIES.forEach(item => seed.push({ ...item, isActive: true }));
+    return seed;
+  };
+
+  // Seed Convex products with default catalog if empty
+  useEffect(() => {
+    if (!convexProducts || convexProducts === undefined) return;
+    if (convexProducts.length > 0) return;
+    if (hasSeededProductsRef.current) return;
+    hasSeededProductsRef.current = true;
+    const seed = buildSeedProducts();
+    convexBulkUpsertProducts(seed).catch(err => {
+      console.error('Failed to seed products to Convex', err);
+      hasSeededProductsRef.current = false;
+    });
+  }, [convexProducts, convexBulkUpsertProducts]);
+
+  // Pull active products from Convex into local catalogs
+  useEffect(() => {
+    if (!convexProducts || convexProducts.length === 0) return;
+
+    const leafsByDoor: Record<DoorType, ProductItem[]> = {
+      single: [],
+      one_half: [],
+      double: [],
+    };
+    const framesByDoor: Record<DoorType, ProductItem[]> = {
+      single: [],
+      one_half: [],
+      double: [],
+    };
+    const optionsList: ProductItem[] = [];
+    const hardwareList: ProductItem[] = [];
+    const accessoriesList: ProductItem[] = [];
+
+    convexProducts.forEach((p: any) => {
+      if (p.isActive === false) return;
+      const base: ProductItem = {
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        category: p.category,
+        description: p.description,
+        imageUrl: p.imageUrl,
+        compatibleWith: p.compatibleWith,
+      };
+      if (p.category === 'leaf') {
+        const doorType = (p.doorType as DoorType) || 'single';
+        leafsByDoor[doorType] = [...leafsByDoor[doorType], base];
+      } else if (p.category === 'frame') {
+        const doorType = (p.doorType as DoorType) || 'single';
+        framesByDoor[doorType] = [...framesByDoor[doorType], base];
+      } else if (p.category === 'option') {
+        optionsList.push(base);
+      } else if (p.category === 'hardware') {
+        hardwareList.push(base);
+      } else if (p.category === 'accessory') {
+        accessoriesList.push(base);
+      }
+    });
+
+    setCatalogLeafs(leafsByDoor);
+    setCatalogFrames(framesByDoor);
+    setCatalogOptions(optionsList);
+    setCatalogHardware(hardwareList);
+    setCatalogAccessories(accessoriesList);
+  }, [convexProducts]);
+
   const currentConfigCost = useMemo(() => {
     let total = 0;
     if (selectedLeaf) total += selectedLeaf.price;
