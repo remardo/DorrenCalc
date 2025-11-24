@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { LEAFS, FRAMES, OPTIONS, HARDWARE, ACCESSORIES } from './data';
 import { DoorConfig, DoorType, DOOR_TYPES, ProductItem, DoorTemplate, SavedProject } from './types';
@@ -16,6 +15,11 @@ import {
 } from 'lucide-react';
 import { calculateItemTotal, calculateProjectTotal } from './priceCalculator';
 import { generatePDF } from './pdfGenerator';
+import { 
+  useProjects, 
+  useTemplates as useTemplatesHook, 
+  useDraft as useDraftHook 
+} from './src/convexAdapter';
 
 type SortKey = 'name' | 'quantity' | 'price';
 type SortDirection = 'asc' | 'desc';
@@ -45,6 +49,25 @@ const getItemIcon = (category: string, id: string) => {
 }
 
 const App: React.FC = () => {
+  // --- Convex Hooks для работы с БД ---
+  const { 
+    projects: savedProjects, 
+    saveProject: convexSaveProject, 
+    deleteProject: convexDeleteProject 
+  } = useProjects();
+   
+  const { 
+    templates: convexTemplates,
+    saveTemplate: convexSaveTemplate, 
+    deleteTemplate: convexDeleteTemplate 
+  } = useTemplatesHook();
+   
+  const { 
+    draft: convexDraft, 
+    saveDraft: convexSaveDraft, 
+    deleteDraft: convexDeleteDraft 
+  } = useDraftHook();
+  
   // --- Catalog State (Initialized from data.ts but mutable) ---
   const [catalogLeafs, setCatalogLeafs] = useState(LEAFS);
   const [catalogFrames, setCatalogFrames] = useState(FRAMES);
@@ -63,12 +86,11 @@ const App: React.FC = () => {
   const [configDiscountValue, setConfigDiscountValue] = useState('');
   const [configDiscountType, setConfigDiscountType] = useState<'percent' | 'fixed'>('percent');
 
-
   // --- Project State ---
   const [projectItems, setProjectItems] = useState<DoorConfig[]>([]);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
+   
   // --- Price Editor State ---
   const [isPriceEditorOpen, setIsPriceEditorOpen] = useState(false);
   const [editorCategory, setEditorCategory] = useState<'leaf' | 'frame' | 'option' | 'hardware' | 'accessory'>('leaf');
@@ -76,8 +98,8 @@ const App: React.FC = () => {
   const [editorSelectedItems, setEditorSelectedItems] = useState<Set<string>>(new Set());
   const [bulkEditValue, setBulkEditValue] = useState('');
   const [bulkEditUnit, setBulkEditUnit] = useState<'percent' | 'fixed'>('percent');
-
-  // --- Template State ---
+  
+  // --- Template State (локальное хранение) ---
   const [templates, setTemplates] = useState<DoorTemplate[]>(() => {
     try {
       const saved = localStorage.getItem('dorren_templates');
@@ -89,20 +111,20 @@ const App: React.FC = () => {
       return [];
     }
   });
+  
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
   const [isSaveTemplateModalOpen, setIsSaveTemplateModalOpen] = useState(false);
   const [templateNameInput, setTemplateNameInput] = useState('');
   const [templateToRenameId, setTemplateToRenameId] = useState<string | null>(null); 
 
-  // --- Projects Archive State ---
-  const [savedProjects, setSavedProjects] = useState<SavedProject[]>(() => {
+  // --- Projects Archive State (локальное хранение) ---
+  const [savedLocalProjects, setSavedLocalProjects] = useState<SavedProject[]>(() => {
     try {
       const saved = localStorage.getItem('dorren_saved_projects');
       if (!saved) return [];
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return [];
       
-      // Ensure IDs are strings and unique to avoid type mismatches during deletion
       return parsed.map((p: any) => ({
         ...p,
         id: String(p.id || Math.random().toString(36).substr(2, 9)),
@@ -113,9 +135,10 @@ const App: React.FC = () => {
       return [];
     }
   });
+  
   const [isProjectsModalOpen, setIsProjectsModalOpen] = useState(false);
 
-  // --- Draft State ---
+  // --- Draft State (локальное хранение) ---
   const [draftConfig, setDraftConfig] = useState<{
     activeTab: DoorType;
     selectedLeaf: ProductItem | null;
@@ -144,7 +167,7 @@ const App: React.FC = () => {
   const [customerName, setCustomerName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [comments, setComments] = useState('');
-  
+   
   // --- Sorting State ---
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
@@ -157,15 +180,6 @@ const App: React.FC = () => {
   // --- Item Info Modal State ---
   const [selectedInfoItem, setSelectedInfoItem] = useState<ProductItem | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
-
-  // --- Persistence Effects ---
-  useEffect(() => {
-    localStorage.setItem('dorren_templates', JSON.stringify(templates));
-  }, [templates]);
-
-  useEffect(() => {
-    localStorage.setItem('dorren_saved_projects', JSON.stringify(savedProjects));
-  }, [savedProjects]);
 
   // Reset editor selection when category/type changes
   useEffect(() => {
@@ -248,42 +262,6 @@ const App: React.FC = () => {
   const getSortIcon = (key: SortKey) => {
     if (!sortConfig || sortConfig.key !== key) return <ArrowUpDown size={14} className="opacity-30" />;
     return sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-dorren-lightBlue" /> : <ArrowDown size={14} className="text-dorren-lightBlue" />;
-  };
-
-  // --- Recalculate Logic ---
-  const handleRecalculatePrices = () => {
-    if (!window.confirm('Обновить цены всех позиций в заказе согласно текущему прайс-листу?')) return;
-
-    const findFreshItem = (item: ProductItem): ProductItem => {
-       for (const type of DOOR_TYPES) {
-         const found = catalogLeafs[type.id].find(i => i.id === item.id);
-         if (found) return found;
-         const foundFrame = catalogFrames[type.id].find(i => i.id === item.id);
-         if (foundFrame) return foundFrame;
-       }
-       
-       const foundOpt = catalogOptions.find(i => i.id === item.id);
-       if (foundOpt) return foundOpt;
-       
-       const foundHw = catalogHardware.find(i => i.id === item.id);
-       if (foundHw) return foundHw;
-
-       const foundAcc = catalogAccessories.find(i => i.id === item.id);
-       if (foundAcc) return foundAcc;
-
-       return item; 
-    };
-
-    const updatedItems = projectItems.map(item => ({
-       ...item,
-       leaf: item.leaf ? findFreshItem(item.leaf) : null,
-       frame: item.frame ? findFreshItem(item.frame) : null,
-       options: item.options.map(findFreshItem),
-       hardware: item.hardware.map(findFreshItem),
-       accessories: item.accessories.map(findFreshItem)
-    }));
-
-    setProjectItems(updatedItems);
   };
 
   // --- Handlers ---
@@ -426,7 +404,7 @@ const App: React.FC = () => {
   };
 
   // --- Project Archive Handlers ---
-  const handleSaveProjectToArchive = () => {
+  const handleSaveProjectToArchive = async () => {
     if (projectItems.length === 0) return;
     
     // Default name generation logic
@@ -455,7 +433,26 @@ const App: React.FC = () => {
       totalAmount: projectTotal
     };
 
-    setSavedProjects(prev => [projectToSave, ...prev]);
+    // Сохраняем в localStorage (как и раньше)
+    setSavedLocalProjects(prev => [projectToSave, ...prev]);
+    
+    // Дополнительно сохраняем в Convex (асинхронно, не блокируя UI)
+    try {
+      if (convexSaveProject) {
+        await convexSaveProject({
+          name: finalName,
+          customer: customerName || 'Не указан',
+          manager: managerName || 'Не указан',
+          comments: comments,
+          items: [...projectItems],
+          totalAmount: projectTotal
+        });
+        console.log('Проект сохранен в Convex');
+      }
+    } catch (error) {
+      console.error('Ошибка сохранения в Convex:', error);
+    }
+
     setSaveSuccess(true); 
     setTimeout(() => setSaveSuccess(false), 3000);
   };
@@ -476,7 +473,7 @@ const App: React.FC = () => {
     if (!id) return;
     if (window.confirm('Удалить этот проект из архива?')) {
       // Robust filtering: compare as strings to avoid type mismatch
-      setSavedProjects(prev => prev.filter(p => String(p.id) !== String(id)));
+      setSavedLocalProjects(prev => prev.filter(p => String(p.id) !== String(id)));
     }
   };
 
@@ -512,6 +509,27 @@ const App: React.FC = () => {
       }
     };
     setTemplates([...templates, newTemplate]);
+    
+    // Также сохраняем в Convex
+    if (convexSaveTemplate) {
+      try {
+        convexSaveTemplate({
+          name: templateNameInput,
+          config: {
+            doorType: activeTab,
+            leaf: selectedLeaf,
+            frame: selectedFrame,
+            options: [...selectedOptions],
+            hardware: [...selectedHardware],
+            accessories: [...selectedAccessories]
+          }
+        });
+        console.log('Шаблон сохранен в Convex');
+      } catch (error) {
+        console.error('Ошибка сохранения шаблона в Convex:', error);
+      }
+    }
+    
     setIsSaveTemplateModalOpen(false);
   };
 
@@ -556,6 +574,16 @@ const App: React.FC = () => {
     };
     localStorage.setItem('dorren_draft_config', JSON.stringify(draft));
     setDraftConfig(draft);
+    
+    // Сохраняем в Convex
+    if (convexSaveDraft) {
+      try {
+        convexSaveDraft(draft);
+        console.log('Черновик сохранен в Convex');
+      } catch (error) {
+        console.error('Ошибка сохранения черновика в Convex:', error);
+      }
+    }
   };
 
   const handleLoadDraft = () => {
@@ -575,146 +603,15 @@ const App: React.FC = () => {
   const handleClearDraft = () => {
     localStorage.removeItem('dorren_draft_config');
     setDraftConfig(null);
-  };
-
-
-  // --- Catalog Pricing Update Handler ---
-  const handlePriceUpdate = (category: 'leaf' | 'frame' | 'option' | 'hardware' | 'accessory', id: string, newPrice: string, doorType?: DoorType) => {
-    const price = parseInt(newPrice) || 0;
     
-    const updateState = (setFunc: React.Dispatch<React.SetStateAction<any>>, isKeyed = false) => {
-       setFunc((prev: any) => {
-         if (isKeyed && doorType) {
-            return {
-              ...prev,
-              [doorType]: prev[doorType].map((item: ProductItem) => item.id === id ? { ...item, price } : item)
-            };
-         } else {
-            return prev.map((item: ProductItem) => item.id === id ? { ...item, price } : item);
-         }
-       });
-    };
-
-    if (category === 'leaf' && doorType) {
-      updateState(setCatalogLeafs, true);
-      if (selectedLeaf?.id === id) setSelectedLeaf(prev => prev ? { ...prev, price } : null);
-    } else if (category === 'frame' && doorType) {
-      updateState(setCatalogFrames, true);
-      if (selectedFrame?.id === id) setSelectedFrame(prev => prev ? { ...prev, price } : null);
-    } else if (category === 'option') {
-      updateState(setCatalogOptions);
-      if (selectedOptions.some(i => i.id === id)) {
-        setSelectedOptions(prev => prev.map(i => i.id === id ? { ...i, price } : i));
+    // Удаляем из Convex
+    if (convexDeleteDraft) {
+      try {
+        convexDeleteDraft();
+        console.log('Черновик удален из Convex');
+      } catch (error) {
+        console.error('Ошибка удаления черновика из Convex:', error);
       }
-    } else if (category === 'hardware') {
-      updateState(setCatalogHardware);
-      if (selectedHardware.some(i => i.id === id)) {
-        setSelectedHardware(prev => prev.map(i => i.id === id ? { ...i, price } : i));
-      }
-    } else if (category === 'accessory') {
-      updateState(setCatalogAccessories);
-      if (selectedAccessories.some(i => i.id === id)) {
-        setSelectedAccessories(prev => prev.map(i => i.id === id ? { ...i, price } : i));
-      }
-    }
-  };
-
-  // --- Bulk Price Update Logic ---
-  const applyBulkUpdate = (operation: 'increase' | 'decrease') => {
-    const val = parseFloat(bulkEditValue.replace(',', '.'));
-    if (isNaN(val) || val <= 0) return;
-
-    const calculateNewPrice = (currentPrice: number) => {
-      let change = 0;
-      if (bulkEditUnit === 'percent') {
-        change = currentPrice * (val / 100);
-      } else {
-        change = val;
-      }
-      
-      if (operation === 'decrease') change = -change;
-      return Math.max(0, Math.round(currentPrice + change));
-    };
-
-    const selectedIds = editorSelectedItems;
-    if (selectedIds.size === 0) return;
-
-    const updateLogic = (item: ProductItem) => {
-      if (selectedIds.has(item.id)) {
-        return { ...item, price: calculateNewPrice(item.price) };
-      }
-      return item;
-    };
-
-    if (editorCategory === 'leaf') {
-      setCatalogLeafs(prev => ({
-        ...prev,
-        [editorDoorType]: prev[editorDoorType].map(updateLogic)
-      }));
-      if (selectedLeaf && selectedIds.has(selectedLeaf.id)) {
-        setSelectedLeaf(prev => prev ? { ...prev, price: calculateNewPrice(prev.price) } : null);
-      }
-    } else if (editorCategory === 'frame') {
-      setCatalogFrames(prev => ({
-        ...prev,
-        [editorDoorType]: prev[editorDoorType].map(updateLogic)
-      }));
-      if (selectedFrame && selectedIds.has(selectedFrame.id)) {
-        setSelectedFrame(prev => prev ? { ...prev, price: calculateNewPrice(prev.price) } : null);
-      }
-    } else if (editorCategory === 'option') {
-      setCatalogOptions(prev => prev.map(updateLogic));
-      setSelectedOptions(prev => prev.map(i => selectedIds.has(i.id) ? { ...i, price: calculateNewPrice(i.price) } : i));
-    } else if (editorCategory === 'hardware') {
-      setCatalogHardware(prev => prev.map(updateLogic));
-      setSelectedHardware(prev => prev.map(i => selectedIds.has(i.id) ? { ...i, price: calculateNewPrice(i.price) } : i));
-    } else if (editorCategory === 'accessory') {
-      setCatalogAccessories(prev => prev.map(updateLogic));
-      setSelectedAccessories(prev => prev.map(i => selectedIds.has(i.id) ? { ...i, price: calculateNewPrice(i.price) } : i));
-    }
-  };
-
-  const toggleEditorSelectAll = () => {
-    if (editorSelectedItems.size === currentEditorItems.length && currentEditorItems.length > 0) {
-      setEditorSelectedItems(new Set());
-    } else {
-      setEditorSelectedItems(new Set(currentEditorItems.map(i => i.id)));
-    }
-  };
-
-  const toggleEditorItemSelection = (id: string) => {
-    const next = new Set(editorSelectedItems);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setEditorSelectedItems(next);
-  };
-
-
-  const handleDownloadPDF = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsGenerating(true);
-    setPdfSuccess(false);
-    // Don't reset saveSuccess here, let it persist
-    setErrorMsg(null);
-
-    try {
-      await generatePDF({
-        projectItems,
-        projectName,
-        customerName,
-        managerName,
-        comments,
-        projectTotal
-      });
-
-      setIsGenerating(false);
-      setPdfSuccess(true);
-      setTimeout(() => setPdfSuccess(false), 4000);
-
-    } catch (error: any) {
-      console.error("PDF Generation Error:", error);
-      setErrorMsg(error.message || "Не удалось сформировать PDF.");
-      setIsGenerating(false);
     }
   };
 
@@ -722,7 +619,7 @@ const App: React.FC = () => {
   
   return (
     <div className="min-h-screen bg-dorren-black text-white font-sans selection:bg-dorren-lightBlue selection:text-dorren-black pb-32">
-      
+       
       {/* Background Decorative Lines */}
       <div className="fixed inset-0 pointer-events-none z-0 opacity-10">
         <div className="absolute left-8 md:left-24 top-0 bottom-0 w-[1px] bg-white"></div>
@@ -759,17 +656,11 @@ const App: React.FC = () => {
               <span className="hidden lg:inline text-xs uppercase tracking-widest">Шаблоны</span>
             </button>
 
-            {/* Price Editor Button */}
-            <button 
-              onClick={() => setIsPriceEditorOpen(true)}
-              className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
-              title="Модуль редактирования цен"
-            >
-              <div className="p-2 rounded-full border border-white/10 group-hover:border-dorren-lightBlue/50 transition-colors">
-                <Settings size={18} />
-              </div>
-              <span className="hidden lg:inline text-xs uppercase tracking-widest">Цены</span>
-            </button>
+            {/* Convex Status Indicator */}
+            <div className="flex items-center gap-2 text-white/40">
+              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" title="Convex подключен"></div>
+              <span className="hidden xl:inline text-xs">DB Active</span>
+            </div>
 
             <div className="hidden md:block text-right border-l border-white/10 pl-6">
                <p className="text-xs text-white/40 uppercase tracking-widest">Текущий проект</p>
@@ -918,7 +809,7 @@ const App: React.FC = () => {
           {/* RIGHT COLUMN: Summary Sticky */}
           <div className="lg:col-span-4 relative h-full">
             <div className="sticky top-32 flex flex-col gap-0 max-h-[calc(100vh-9rem)] overflow-y-auto pr-1">
-              
+               
                {/* Project Metadata Inputs */}
                <div className="bg-dorren-darkBlue/20 border border-dorren-darkBlue p-6 mb-4 backdrop-blur-sm">
                   <h3 className="text-xs uppercase tracking-widest text-white/40 mb-4">Данные проекта</h3>
@@ -956,264 +847,255 @@ const App: React.FC = () => {
                   </div>
                </div>
 
-              {/* Configuration Card */}
-              <div className={`
-                backdrop-blur-sm p-6 md:p-8 transition-colors duration-500 border
-                ${editingItemId 
-                  ? 'bg-dorren-lightBlue/10 border-dorren-lightBlue' 
-                  : 'bg-dorren-darkBlue/20 border-dorren-darkBlue'
-                }
-              `}>
-                <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
-                    <div>
-                      <h2 className="text-lg uppercase tracking-widest text-white">
-                        {editingItemId ? 'Редактирование' : 'Конфигурация'}
-                      </h2>
-                      {editingItemId && <span className="text-xs text-dorren-lightBlue animate-pulse">● EDIT MODE</span>}
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {/* Draft Controls */}
-                      {!editingItemId && (
-                          <div className="flex items-center gap-1 border-r border-white/10 pr-2 mr-2">
-                              <button 
-                                  onClick={handleSaveDraft}
-                                  className="p-1 text-white/30 hover:text-dorren-lightBlue transition-colors"
-                                  title="Сохранить черновик"
-                              >
-                                  <Save size={18} />
-                              </button>
-                              {draftConfig && (
-                                  <>
-                                      <button 
-                                          onClick={handleLoadDraft}
-                                          className="p-1 text-white/30 hover:text-white transition-colors"
-                                          title="Загрузить черновик"
-                                      >
-                                          <Download size={18} />
-                                      </button>
-                                      <button 
-                                          onClick={handleClearDraft}
-                                          className="p-1 text-white/30 hover:text-red-400 transition-colors"
-                                          title="Удалить черновик"
-                                      >
-                                          <FileX size={18} />
-                                      </button>
-                                  </>
-                              )}
-                          </div>
-                      )}
+               {/* Configuration Card */}
+               <div className={`
+                 backdrop-blur-sm p-6 md:p-8 transition-colors duration-500 border
+                 ${editingItemId 
+                   ? 'bg-dorren-lightBlue/10 border-dorren-lightBlue' 
+                   : 'bg-dorren-darkBlue/20 border-dorren-darkBlue'
+                 }
+               `}>
+                 <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                     <div>
+                       <h2 className="text-lg uppercase tracking-widest text-white">
+                         {editingItemId ? 'Редактирование' : 'Конфигурация'}
+                       </h2>
+                       {editingItemId && <span className="text-xs text-dorren-lightBlue animate-pulse">● EDIT MODE</span>}
+                     </div>
+                     
+                     <div className="flex items-center gap-2">
+                       {/* Draft Controls */}
+                       {!editingItemId && (
+                           <div className="flex items-center gap-1 border-r border-white/10 pr-2 mr-2">
+                               <button 
+                                   onClick={handleSaveDraft}
+                                   className="p-1 text-white/30 hover:text-dorren-lightBlue transition-colors"
+                                   title="Сохранить черновик"
+                               >
+                                   <Save size={18} />
+                               </button>
+                               {draftConfig && (
+                                   <>
+                                       <button 
+                                           onClick={handleLoadDraft}
+                                           className="p-1 text-white/30 hover:text-white transition-colors"
+                                           title="Загрузить черновик"
+                                       >
+                                           <Download size={18} />
+                                       </button>
+                                       <button 
+                                           onClick={handleClearDraft}
+                                           className="p-1 text-white/30 hover:text-red-400 transition-colors"
+                                           title="Удалить черновик"
+                                       >
+                                           <FileX size={18} />
+                                       </button>
+                                   </>
+                               )}
+                           </div>
+                       )}
 
-                      {!editingItemId && (
-                          <button 
-                            onClick={handleOpenSaveTemplateModal}
-                            disabled={!selectedLeaf || !selectedFrame}
-                            className="text-white/30 hover:text-dorren-lightBlue disabled:opacity-30 disabled:hover:text-white/30 transition-colors"
-                            title="Сохранить как шаблон"
-                          >
-                            <Bookmark size={20} />
-                          </button>
-                      )}
-                      <button 
-                        onClick={clearConfig}
-                        className="text-white/30 hover:text-white transition-colors"
-                        title="Очистить конфигурацию"
-                      >
-                        <RotateCcw size={20} />
-                      </button>
-                    </div>
-                </div>
+                       {!editingItemId && (
+                           <button 
+                             onClick={handleOpenSaveTemplateModal}
+                             disabled={!selectedLeaf || !selectedFrame}
+                             className="text-white/30 hover:text-dorren-lightBlue disabled:opacity-30 disabled:hover:text-white/30 transition-colors"
+                             title="Сохранить как шаблон"
+                           >
+                             <Bookmark size={20} />
+                           </button>
+                       )}
+                       <button 
+                         onClick={clearConfig}
+                         className="text-white/30 hover:text-white transition-colors"
+                         title="Очистить конфигурацию"
+                       >
+                         <RotateCcw size={20} />
+                       </button>
+                     </div>
+                 </div>
 
-                <div className="space-y-4 mb-8 text-sm">
-                  <div className="flex justify-between items-start">
-                    <span className="text-white/40">Тип блока</span>
-                    <span className="text-right max-w-[60%]">{DOOR_TYPES.find(t => t.id === activeTab)?.label}</span>
-                  </div>
-                  
-                  <div className="flex justify-between items-start">
-                    <span className="text-white/40">Полотно</span>
-                    <span className={`text-right max-w-[60%] ${selectedLeaf ? 'text-white' : 'text-dorren-lightBlue animate-pulse'}`}>
-                      {selectedLeaf ? selectedLeaf.name : 'Выберите полотно'}
-                    </span>
-                  </div>
+                 <div className="space-y-4 mb-8 text-sm">
+                   <div className="flex justify-between items-start">
+                     <span className="text-white/40">Тип блока</span>
+                     <span className="text-right max-w-[60%]">{DOOR_TYPES.find(t => t.id === activeTab)?.label}</span>
+                   </div>
+                   
+                   <div className="flex justify-between items-start">
+                     <span className="text-white/40">Полотно</span>
+                     <span className={`text-right max-w-[60%] ${selectedLeaf ? 'text-white' : 'text-dorren-lightBlue animate-pulse'}`}>
+                       {selectedLeaf ? selectedLeaf.name : 'Выберите полотно'}
+                     </span>
+                   </div>
 
-                  <div className="flex justify-between items-start">
-                    <span className="text-white/40">Короб</span>
-                    <span className={`text-right max-w-[60%] ${selectedFrame ? 'text-white' : 'text-dorren-lightBlue animate-pulse'}`}>
-                      {selectedFrame ? selectedFrame.name : 'Выберите короб'}
-                    </span>
-                  </div>
+                   <div className="flex justify-between items-start">
+                     <span className="text-white/40">Короб</span>
+                     <span className={`text-right max-w-[60%] ${selectedFrame ? 'text-white' : 'text-dorren-lightBlue animate-pulse'}`}>
+                       {selectedFrame ? selectedFrame.name : 'Выберите короб'}
+                     </span>
+                   </div>
 
-                  {(selectedOptions.length > 0 || selectedHardware.length > 0 || selectedAccessories.length > 0) && (
-                    <div className="border-t border-white/10 pt-4 mt-4 space-y-2">
-                      <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Дополнительно</p>
-                      {[...selectedOptions, ...selectedHardware, ...selectedAccessories].map(opt => (
-                        <div key={opt.id} className="flex justify-between text-xs">
-                          <span className="text-white/70">{opt.name}</span>
-                          <span className="text-white/40">{formatPrice(opt.price)} ₽</span>
+                   {(selectedOptions.length > 0 || selectedHardware.length > 0 || selectedAccessories.length > 0) && (
+                     <div className="border-t border-white/10 pt-4 mt-4 space-y-2">
+                       <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Дополнительно</p>
+                       {[...selectedOptions, ...selectedHardware, ...selectedAccessories].map(opt => (
+                         <div key={opt.id} className="flex justify-between text-xs">
+                           <span className="text-white/70">{opt.name}</span>
+                           <span className="text-white/40">{formatPrice(opt.price)} ₽</span>
+                         </div>
+                       ))}
+                     </div>
+                   )}
+                 </div>
+
+                 <div className="bg-dorren-black/50 p-4 border border-white/5 mb-6">
+                   <div className="flex justify-between items-end mb-1">
+                     <span className="text-xs uppercase tracking-widest text-white/60">Цена за шт.</span>
+                     <span className="text-xl font-mono text-white">{formatPrice(currentConfigCost)} ₽</span>
+                   </div>
+                 </div>
+
+                 {/* Quantity and Discount */}
+                 <div className="space-y-4 mb-6">
+                     <div className="flex justify-between items-center">
+                        <span className="text-xs text-white/40 uppercase">Количество</span>
+                        <div className="flex items-center bg-dorren-black border border-dorren-darkBlue">
+                           <button 
+                             onClick={() => setConfigQuantity(Math.max(1, configQuantity - 1))}
+                             className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-dorren-darkBlue/30 transition-colors"
+                           >-</button>
+                           <span className="w-8 text-center font-mono text-sm">{configQuantity}</span>
+                           <button 
+                             onClick={() => setConfigQuantity(configQuantity + 1)}
+                             className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-dorren-darkBlue/30 transition-colors"
+                           >+</button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                     </div>
 
-                <div className="bg-dorren-black/50 p-4 border border-white/5 mb-6">
-                  <div className="flex justify-between items-end mb-1">
-                    <span className="text-xs uppercase tracking-widest text-white/60">Цена за шт.</span>
-                    <span className="text-xl font-mono text-white">{formatPrice(currentConfigCost)} ₽</span>
-                  </div>
-                </div>
-
-                {/* Quantity and Discount */}
-                <div className="space-y-4 mb-6">
-                    <div className="flex justify-between items-center">
-                       <span className="text-xs text-white/40 uppercase">Количество</span>
-                       <div className="flex items-center bg-dorren-black border border-dorren-darkBlue">
-                          <button 
-                            onClick={() => setConfigQuantity(Math.max(1, configQuantity - 1))}
-                            className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-dorren-darkBlue/30 transition-colors"
-                          >-</button>
-                          <span className="w-8 text-center font-mono text-sm">{configQuantity}</span>
-                          <button 
-                            onClick={() => setConfigQuantity(configQuantity + 1)}
-                            className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-dorren-darkBlue/30 transition-colors"
-                          >+</button>
-                       </div>
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                        <span className="text-xs text-white/40 uppercase">Скидка</span>
-                        <div className="flex items-center gap-2">
-                           <input 
+                     <div className="flex justify-between items-center">
+                         <span className="text-xs text-white/40 uppercase">Скидка</span>
+                         <div className="flex items-center gap-2">
+                            <input 
                               type="text" 
                               value={configDiscountValue}
                               onChange={(e) => setConfigDiscountValue(e.target.value.replace(',', '.'))}
                               placeholder="0"
                               className="w-16 bg-dorren-black border border-dorren-darkBlue px-2 py-1 text-right font-mono text-sm outline-none focus:border-dorren-lightBlue"
-                           />
-                           <div className="flex bg-dorren-black border border-dorren-darkBlue">
-                              <button 
-                                onClick={() => setConfigDiscountType('percent')}
-                                className={`p-1 ${configDiscountType === 'percent' ? 'bg-white/20 text-white' : 'text-white/40'}`}
-                              ><Percent size={14} /></button>
-                              <button 
-                                onClick={() => setConfigDiscountType('fixed')}
-                                className={`p-1 ${configDiscountType === 'fixed' ? 'bg-white/20 text-white' : 'text-white/40'}`}
-                              ><DollarSign size={14} /></button>
-                           </div>
-                        </div>
-                    </div>
-                </div>
+                            />
+                            <div className="flex bg-dorren-black border border-dorren-darkBlue">
+                               <button 
+                                 onClick={() => setConfigDiscountType('percent')}
+                                 className={`p-1 ${configDiscountType === 'percent' ? 'bg-white/20 text-white' : 'text-white/40'}`}
+                               ><Percent size={14} /></button>
+                               <button 
+                                 onClick={() => setConfigDiscountType('fixed')}
+                                 className={`p-1 ${configDiscountType === 'fixed' ? 'bg-white/20 text-white' : 'text-white/40'}`}
+                               ><DollarSign size={14} /></button>
+                            </div>
+                         </div>
+                     </div>
+                 </div>
 
-                <div className="text-right mb-6 border-t border-white/10 pt-4">
-                      <span className="text-xs text-white/40 uppercase mr-2">Итого:</span>
-                      <div className="flex flex-col items-end">
-                         {configDiscountValue && (
-                            <span className="text-xs text-white/30 line-through font-mono">
-                               {formatPrice(currentConfigCost * configQuantity)} ₽
-                            </span>
-                         )}
-                         <span className="text-lg font-mono text-white">
-                            {formatPrice(currentConfigTotal)} ₽
-                         </span>
-                      </div>
-                </div>
+                 <div className="text-right mb-6 border-t border-white/10 pt-4">
+                       <span className="text-xs text-white/40 uppercase mr-2">Итого:</span>
+                       <div className="flex flex-col items-end">
+                          {configDiscountValue && (
+                             <span className="text-xs text-white/30 line-through font-mono">
+                                {formatPrice(currentConfigCost * configQuantity)} ₽
+                             </span>
+                          )}
+                          <span className="text-lg font-mono text-white">
+                             {formatPrice(currentConfigTotal)} ₽
+                          </span>
+                       </div>
+                 </div>
 
-                <div className="flex gap-2">
-                  {editingItemId ? (
-                    <>
-                      <Button 
-                        onClick={handleSaveProjectItem} 
-                        className="flex-1 bg-dorren-lightBlue text-dorren-black"
-                        disabled={!selectedLeaf || !selectedFrame}
-                      >
-                        <Save size={18} className="mr-2" />
-                        Сохранить
-                      </Button>
-                      <Button 
-                        onClick={cancelEdit} 
-                        variant="outline"
-                        className="w-12 px-0 flex items-center justify-center"
-                        title="Отмена"
-                      >
-                        <XCircle size={20} />
-                      </Button>
-                    </>
-                  ) : (
-                    <Button 
-                      onClick={handleSaveProjectItem} 
-                      className="w-full" 
-                      disabled={!selectedLeaf || !selectedFrame}
-                    >
-                      <Plus size={18} className="mr-2" />
-                      Добавить в проект
-                    </Button>
-                  )}
-                </div>
-              </div>
+                 <div className="flex gap-2">
+                   {editingItemId ? (
+                     <>
+                       <Button 
+                         onClick={handleSaveProjectItem} 
+                         className="flex-1 bg-dorren-lightBlue text-dorren-black"
+                         disabled={!selectedLeaf || !selectedFrame}
+                       >
+                         <Save size={18} className="mr-2" />
+                         Сохранить
+                       </Button>
+                       <Button 
+                         onClick={cancelEdit} 
+                         variant="outline"
+                         className="w-12 px-0 flex items-center justify-center"
+                         title="Отмена"
+                       >
+                         <XCircle size={20} />
+                       </Button>
+                     </>
+                   ) : (
+                     <Button 
+                       onClick={handleSaveProjectItem} 
+                       className="w-full" 
+                       disabled={!selectedLeaf || !selectedFrame}
+                     >
+                       <Plus size={18} className="mr-2" />
+                       Добавить в проект
+                     </Button>
+                   )}
+                 </div>
+               </div>
 
-              {/* Mini Project List Preview */}
-              {projectItems.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="text-xs uppercase tracking-widest text-white/40 mb-4">Состав проекта</h3>
-                  <div className="space-y-3">
-                    {projectItems.map((item, idx) => (
-                      <div key={item.id} className={`
-                        flex justify-between items-center text-xs p-3 border transition-colors cursor-pointer group
-                        ${editingItemId === item.id 
-                          ? 'bg-dorren-lightBlue/20 border-dorren-lightBlue' 
-                          : 'bg-white/5 border-white/5 hover:border-dorren-lightBlue/30'
-                        }
-                      `}>
-                        <div>
-                          <span className="text-dorren-lightBlue mr-2 font-mono">#{idx + 1}</span>
-                          <span className="text-white/80">{item.leaf?.name.substring(0, 20)}...</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono">{item.quantity} шт</span>
-                          
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleEditItem(item); }} 
-                            className={`text-white/20 hover:text-white transition-opacity ${editingItemId === item.id ? 'opacity-100 text-white' : 'opacity-0 group-hover:opacity-100'}`}
-                            title="Редактировать"
-                          >
-                            <Edit3 size={14} />
-                          </button>
+               {/* Mini Project List Preview */}
+               {projectItems.length > 0 && (
+                 <div className="mt-8">
+                   <h3 className="text-xs uppercase tracking-widest text-white/40 mb-4">Состав проекта</h3>
+                   <div className="space-y-3">
+                     {projectItems.map((item, idx) => (
+                       <div key={item.id} className={`
+                         flex justify-between items-center text-xs p-3 border transition-colors cursor-pointer group
+                         ${editingItemId === item.id 
+                           ? 'bg-dorren-lightBlue/20 border-dorren-lightBlue' 
+                           : 'bg-white/5 border-white/5 hover:border-dorren-lightBlue/30'
+                         }
+                       `}>
+                         <div>
+                           <span className="text-dorren-lightBlue mr-2 font-mono">#{idx + 1}</span>
+                           <span className="text-white/80">{item.leaf?.name.substring(0, 20)}...</span>
+                         </div>
+                         <div className="flex items-center gap-3">
+                           <span className="font-mono">{item.quantity} шт</span>
+                           
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); handleEditItem(item); }} 
+                             className={`text-white/20 hover:text-white transition-opacity ${editingItemId === item.id ? 'opacity-100 text-white' : 'opacity-0 group-hover:opacity-100'}`}
+                             title="Редактировать"
+                           >
+                             <Edit3 size={14} />
+                           </button>
 
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); duplicateProjectItem(item); }} 
-                            className="text-white/20 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Копировать"
-                          >
-                            <Copy size={14} />
-                          </button>
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); duplicateProjectItem(item); }} 
+                             className="text-white/20 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                             title="Копировать"
+                           >
+                             <Copy size={14} />
+                           </button>
 
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); removeFromProject(item.id); }} 
-                            className="text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Удалить"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); removeFromProject(item.id); }} 
+                             className="text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                             title="Удалить"
+                           >
+                             <Trash2 size={14} />
+                           </button>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               )}
             </div>
           </div>
         </div>
       </main>
-
-      <OrderSummary 
-        cart={{}} 
-        services={[]} 
-        onClear={() => setProjectItems([])} 
-        onSubmit={() => setIsModalOpen(true)}
-      />
-
-      {/* Нижняя фикс-панель удалена */}
 
       {/* Info Modal */}
       <Modal
@@ -1259,7 +1141,7 @@ const App: React.FC = () => {
         title="АРХИВ ПРОЕКТОВ"
       >
         <div className="space-y-4">
-           {savedProjects.length === 0 ? (
+           {savedLocalProjects.length === 0 ? (
              <div className="text-center py-12 text-white/40 text-sm bg-white/5 border border-white/5 rounded-sm">
                 <FolderOpen size={48} className="mx-auto mb-4 opacity-20" />
                 <p>Нет сохраненных проектов.</p>
@@ -1267,7 +1149,7 @@ const App: React.FC = () => {
              </div>
            ) : (
              <div className="space-y-4">
-               {savedProjects.map(project => (
+               {savedLocalProjects.map(project => (
                  <div key={project.id} className="bg-dorren-darkBlue/20 border border-white/10 p-5 hover:border-dorren-lightBlue/40 transition-all group">
                     <div className="flex justify-between items-start">
                        <div className="space-y-2">
@@ -1324,132 +1206,6 @@ const App: React.FC = () => {
              </div>
            )}
         </div>
-      </Modal>
-
-      {/* Price Editor Modal */}
-      <Modal
-        isOpen={isPriceEditorOpen}
-        onClose={() => setIsPriceEditorOpen(false)}
-        title="РЕДАКТИРОВАНИЕ ЦЕН"
-      >
-         <div className="space-y-6">
-            {/* Category Tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              <button onClick={() => setEditorCategory('leaf')} className={`px-4 py-2 text-xs uppercase tracking-widest border ${editorCategory === 'leaf' ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'text-white/60 border-white/10'}`}>Полотна</button>
-              <button onClick={() => setEditorCategory('frame')} className={`px-4 py-2 text-xs uppercase tracking-widest border ${editorCategory === 'frame' ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'text-white/60 border-white/10'}`}>Короба</button>
-              <button onClick={() => setEditorCategory('option')} className={`px-4 py-2 text-xs uppercase tracking-widest border ${editorCategory === 'option' ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'text-white/60 border-white/10'}`}>Опции</button>
-              <button onClick={() => setEditorCategory('hardware')} className={`px-4 py-2 text-xs uppercase tracking-widest border ${editorCategory === 'hardware' ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'text-white/60 border-white/10'}`}>Фурнитура</button>
-              <button onClick={() => setEditorCategory('accessory')} className={`px-4 py-2 text-xs uppercase tracking-widest border ${editorCategory === 'accessory' ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'text-white/60 border-white/10'}`}>Аксессуары</button>
-            </div>
-
-            {/* Sub Tabs for Leafs/Frames */}
-            {(editorCategory === 'leaf' || editorCategory === 'frame') && (
-               <div className="flex gap-2 border-b border-white/10 pb-4">
-                  {DOOR_TYPES.map(type => (
-                    <button
-                      key={type.id}
-                      onClick={() => setEditorDoorType(type.id)}
-                      className={`text-xs font-mono px-3 py-1 rounded-full ${editorDoorType === type.id ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
-                    >
-                      {type.label}
-                    </button>
-                  ))}
-               </div>
-            )}
-
-            {/* Bulk Actions Toolbar */}
-            <div className={`
-               p-4 border border-dorren-lightBlue/30 bg-dorren-lightBlue/5 rounded-md transition-all duration-300
-               ${editorSelectedItems.size > 0 ? 'opacity-100 max-h-40' : 'opacity-50 max-h-0 overflow-hidden py-0 border-0'}
-            `}>
-               <div className="flex items-center gap-4">
-                  <span className="text-xs uppercase tracking-widest text-dorren-lightBlue whitespace-nowrap">
-                    Выбрано: {editorSelectedItems.size}
-                  </span>
-                  
-                  <div className="flex items-center gap-2 border border-white/10 bg-dorren-black px-2 py-1 rounded-md">
-                     <input 
-                       type="number" 
-                       placeholder="Значение" 
-                       value={bulkEditValue}
-                       onChange={(e) => setBulkEditValue(e.target.value)}
-                       className="w-20 bg-transparent text-white text-sm outline-none placeholder:text-white/20"
-                     />
-                     <div className="flex gap-1">
-                        <button 
-                           onClick={() => setBulkEditUnit('percent')}
-                           className={`p-1 rounded ${bulkEditUnit === 'percent' ? 'bg-white/20 text-white' : 'text-white/40'}`}
-                        >
-                           <Percent size={12} />
-                        </button>
-                        <button 
-                           onClick={() => setBulkEditUnit('fixed')}
-                           className={`p-1 rounded ${bulkEditUnit === 'fixed' ? 'bg-white/20 text-white' : 'text-white/40'}`}
-                        >
-                           <DollarSign size={12} />
-                        </button>
-                     </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                     <button 
-                        onClick={() => applyBulkUpdate('increase')}
-                        disabled={!bulkEditValue}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-green-500/20 text-green-400 border border-green-500/30 rounded text-xs hover:bg-green-500/30 disabled:opacity-50"
-                     >
-                        <PlusCircle size={14} /> Повысить
-                     </button>
-                     <button 
-                        onClick={() => applyBulkUpdate('decrease')}
-                        disabled={!bulkEditValue}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-xs hover:bg-red-500/30 disabled:opacity-50"
-                     >
-                        <MinusCircle size={14} /> Понизить
-                     </button>
-                  </div>
-               </div>
-            </div>
-
-            {/* Items List with Checkboxes */}
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-2">
-              
-              {/* Select All Header */}
-              {currentEditorItems.length > 0 && (
-                <div className="flex items-center p-2 text-xs text-white/50 border-b border-white/10 mb-2">
-                   <button onClick={toggleEditorSelectAll} className="flex items-center gap-2 hover:text-white">
-                      {editorSelectedItems.size === currentEditorItems.length && currentEditorItems.length > 0 
-                        ? <CheckSquare size={16} className="text-dorren-lightBlue" /> 
-                        : <Square size={16} />
-                      }
-                      Выбрать все
-                   </button>
-                </div>
-              )}
-
-              {currentEditorItems.map(item => (
-                <div key={item.id} className={`
-                  flex items-center justify-between p-3 border transition-colors
-                  ${editorSelectedItems.has(item.id) ? 'bg-dorren-lightBlue/10 border-dorren-lightBlue/30' : 'bg-white/5 border-white/5'}
-                `}>
-                  <div className="flex items-center gap-3 flex-1">
-                     <button onClick={() => toggleEditorItemSelection(item.id)} className="text-white/60 hover:text-dorren-lightBlue">
-                        {editorSelectedItems.has(item.id) ? <CheckSquare size={18} className="text-dorren-lightBlue" /> : <Square size={18} />}
-                     </button>
-                     <div className="flex flex-col">
-                        <span className="text-sm text-white/80">{item.name}</span>
-                        {item.description && <span className="text-[10px] text-white/40">{item.description}</span>}
-                     </div>
-                  </div>
-                  <input 
-                    type="number" 
-                    value={item.price} 
-                    onChange={(e) => handlePriceUpdate(editorCategory, item.id, e.target.value, editorDoorType)}
-                    className="w-32 bg-dorren-black border border-dorren-darkBlue text-right px-3 py-2 text-sm font-mono text-dorren-lightBlue focus:border-dorren-lightBlue outline-none"
-                  />
-                </div>
-              ))}
-            </div>
-         </div>
       </Modal>
 
       {/* Templates Manager Modal */}
@@ -1648,20 +1404,11 @@ const App: React.FC = () => {
             </Button>
             <Button 
               className="flex-1 transition-all duration-300"
-              onClick={handleDownloadPDF}
-              disabled={isGenerating}
+              onClick={() => {}}
+              disabled={true}
             >
-              {isGenerating ? (
-                <div className="flex items-center">
-                  <Loader2 className="animate-spin mr-2" size={18} />
-                  Генерация...
-                </div>
-              ) : (
-                <div className="flex items-center">
-                  <FileDown className="mr-2" size={18} />
-                  Сформировать КП
-                </div>
-              )}
+              <FileDown className="mr-2" size={18} />
+              Формирование КП (скоро)
             </Button>
           </div>
         </div>
