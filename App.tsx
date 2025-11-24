@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LEAFS, FRAMES, OPTIONS, HARDWARE, ACCESSORIES } from './data';
 import { DoorConfig, DoorType, DOOR_TYPES, ProductItem, DoorTemplate, SavedProject } from './types';
 import { Logo } from './components/Logo';
@@ -165,40 +165,58 @@ const App: React.FC = () => {
   });
 
   // --- Sync Convex data into UI state ---
+  const lastTemplatesSigRef = useRef<string | null>(null);
+  const lastProjectsSigRef = useRef<string | null>(null);
   useEffect(() => {
-    if (convexTemplates && Array.isArray(convexTemplates)) {
-      const normalizedTemplates: DoorTemplate[] = convexTemplates.map((template: any) => ({
-        id: String(template._id),
-        name: template.name,
-        config: {
-          doorType: template.config?.doorType as DoorType,
-          leaf: template.config?.leaf ?? null,
-          frame: template.config?.frame ?? null,
-          options: template.config?.options ?? [],
-          hardware: template.config?.hardware ?? [],
-          accessories: template.config?.accessories ?? [],
-        }
-      }));
-      setTemplates(normalizedTemplates);
-    }
-  }, [convexTemplates]);
+    if (!convexTemplates || !Array.isArray(convexTemplates)) return;
+    // Avoid overwriting locally cached templates if Convex returns empty but we already have local data
+    if (convexTemplates.length === 0 && templates.length > 0) return;
+
+    const sig = convexTemplates
+      .map((template: any) => `${template._id}:${template.name}`)
+      .join('|');
+    if (sig === lastTemplatesSigRef.current) return;
+
+    const normalizedTemplates: DoorTemplate[] = convexTemplates.map((template: any) => ({
+      id: String(template._id),
+      name: template.name,
+      config: {
+        doorType: template.config?.doorType as DoorType,
+        leaf: template.config?.leaf ?? null,
+        frame: template.config?.frame ?? null,
+        options: template.config?.options ?? [],
+        hardware: template.config?.hardware ?? [],
+        accessories: template.config?.accessories ?? [],
+      }
+    }));
+    setTemplates(normalizedTemplates);
+    lastTemplatesSigRef.current = sig;
+  }, [convexTemplates, templates.length]);
 
   useEffect(() => {
-    if (savedProjects && Array.isArray(savedProjects)) {
-      const normalizedProjects: SavedProject[] = savedProjects.map((project: any) => ({
-        id: String(project._id),
-        createdAt: project.createdAt ?? project._creationTime ?? Date.now(),
-        updatedAt: project.updatedAt ?? project.createdAt ?? project._creationTime ?? Date.now(),
-        name: project.name,
-        customer: project.customer,
-        manager: project.manager,
-        comments: project.comments,
-        items: project.items ?? [],
-        totalAmount: project.totalAmount,
-      }));
-      setSavedLocalProjects(normalizedProjects);
-    }
-  }, [savedProjects]);
+    if (!savedProjects || !Array.isArray(savedProjects)) return;
+    // Avoid wiping local fallback data if Convex returns empty (e.g., offline or mutation failed)
+    if (savedProjects.length === 0 && savedLocalProjects.length > 0) return;
+
+    const sig = savedProjects
+      .map((project: any) => `${project._id}:${project.updatedAt ?? project._creationTime ?? ''}:${project.totalAmount ?? ''}:${project.items?.length ?? 0}`)
+      .join('|');
+    if (sig === lastProjectsSigRef.current) return;
+
+    const normalizedProjects: SavedProject[] = savedProjects.map((project: any) => ({
+      id: String(project._id),
+      createdAt: project.createdAt ?? project._creationTime ?? Date.now(),
+      updatedAt: project.updatedAt ?? project.createdAt ?? project._creationTime ?? Date.now(),
+      name: project.name,
+      customer: project.customer,
+      manager: project.manager,
+      comments: project.comments,
+      items: project.items ?? [],
+      totalAmount: project.totalAmount,
+    }));
+    setSavedLocalProjects(normalizedProjects);
+    lastProjectsSigRef.current = sig;
+  }, [savedProjects, savedLocalProjects.length]);
 
   // --- Form State ---
   const [managerName, setManagerName] = useState('');

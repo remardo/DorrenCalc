@@ -53,10 +53,10 @@ export default defineSchema({
         imageUrl: v.optional(v.string()),
       })),
       quantity: v.number(),
-      discount: v.union(v.object({
+      discount: v.optional(v.union(v.object({
         value: v.number(),
         type: v.union(v.literal("percent"), v.literal("fixed")),
-      }), v.null()),
+      }), v.null())),
     })),
     totalAmount: v.number(),
     createdAt: v.number(),
