@@ -77,6 +77,7 @@ const App: React.FC = () => {
   } = useProductsHook();
 
   const hasSeededProductsRef = useRef(false);
+  const hasSyncedCatalogPricesRef = useRef(false);
   
   // --- Catalog State (Initialized from data.ts but mutable) ---
   const [catalogLeafs, setCatalogLeafs] = useState(LEAFS);
@@ -147,6 +148,7 @@ const App: React.FC = () => {
   });
   
   const [isProjectsModalOpen, setIsProjectsModalOpen] = useState(false);
+  const [priceEdits, setPriceEdits] = useState<Record<string, number>>({});
 
   // --- Draft State (локальное хранение) ---
   const [draftConfig, setDraftConfig] = useState<{
@@ -240,8 +242,9 @@ const App: React.FC = () => {
   const [pdfSuccess, setPdfSuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSavingPrices, setIsSavingPrices] = useState(false);
 
-  // --- Item Info Modal State ---
+      // --- Item Info Modal State ---
   const [selectedInfoItem, setSelectedInfoItem] = useState<ProductItem | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
 
@@ -250,6 +253,21 @@ const App: React.FC = () => {
     setEditorSelectedItems(new Set());
     setBulkEditValue('');
   }, [editorCategory, editorDoorType, isPriceEditorOpen]);
+
+  // Prime price edits when opening price editor from current catalog/Convex data
+  useEffect(() => {
+    if (!isPriceEditorOpen) return;
+    const sourceProducts = convexProducts && convexProducts.length > 0
+      ? convexProducts
+      : [
+          ...buildSeedProducts(),
+        ];
+    const initial: Record<string, number> = {};
+    sourceProducts.forEach((p: any) => {
+      initial[p.id] = p.price;
+    });
+    setPriceEdits(initial);
+  }, [isPriceEditorOpen, convexProducts]);
 
   // --- Helpers ---
   const buildSeedProducts = () => {
@@ -331,6 +349,70 @@ const App: React.FC = () => {
     setCatalogHardware(hardwareList);
     setCatalogAccessories(accessoriesList);
   }, [convexProducts]);
+
+  // Build updated product list with edited prices for saving to Convex
+  const buildUpdatedProductsForSave = () => {
+    const base = (convexProducts && convexProducts.length > 0)
+      ? convexProducts
+      : buildSeedProducts();
+    return base.map((p: any) => ({
+      ...p,
+      price: priceEdits[p.id] ?? p.price,
+    }));
+  };
+
+  const handleSavePrices = async () => {
+    setIsSavingPrices(true);
+    try {
+      const payload = buildUpdatedProductsForSave();
+      await convexBulkUpsertProducts(payload);
+      setIsPriceEditorOpen(false);
+    } catch (error) {
+      console.error('Failed to save prices to Convex', error);
+    } finally {
+      setIsSavingPrices(false);
+    }
+  };
+
+  const handlePriceInputChange = (id: string, value: string) => {
+    const normalized = value.replace(',', '.');
+    const num = parseFloat(normalized);
+    if (Number.isNaN(num)) return;
+    setPriceEdits((prev) => ({ ...prev, [id]: num }));
+  };
+
+
+  // Sync UI catalog prices to Convex once when data is available
+  useEffect(() => {
+    if (hasSyncedCatalogPricesRef.current) return;
+    if (convexProducts === undefined) return; // wait for query resolution
+
+    // Take current in-memory catalog (including any price edits) and push to Convex
+    const currentCatalogProducts: any[] = [
+      ...Object.entries(catalogLeafs).flatMap(([doorType, items]) =>
+        (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
+      ),
+      ...Object.entries(catalogFrames).flatMap(([doorType, items]) =>
+        (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
+      ),
+      ...catalogOptions.map((p) => ({ ...p, isActive: true })),
+      ...catalogHardware.map((p) => ({ ...p, isActive: true })),
+      ...catalogAccessories.map((p) => ({ ...p, isActive: true })),
+    ];
+
+    convexBulkUpsertProducts(currentCatalogProducts)
+      .catch((err) => console.error('Failed to sync catalog prices to Convex', err))
+      .finally(() => { hasSyncedCatalogPricesRef.current = true; });
+  }, [convexProducts, catalogLeafs, catalogFrames, catalogOptions, catalogHardware, catalogAccessories, convexBulkUpsertProducts]);
+const toggleSelectAllEditor = () => {
+    const allIds = currentEditorItems.map((p) => p.id);
+    const allSelected = allIds.every((id) => editorSelectedItems.has(id));
+    if (allSelected) {
+      setEditorSelectedItems(new Set());
+    } else {
+      setEditorSelectedItems(new Set(allIds));
+    }
+  };
 
   const currentConfigCost = useMemo(() => {
     let total = 0;
@@ -730,6 +812,54 @@ const App: React.FC = () => {
     setIsSaveTemplateModalOpen(true);
   };
 
+  const renderPriceEditorItems = () => {
+    if (currentEditorItems.length === 0) {
+      return (
+        <div className="text-white/50 text-sm border border-white/10 p-4 rounded-sm">
+          Нет позиций для выбранной категории/типа двери.
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-3 max-h-[520px] overflow-y-auto pr-2 custom-scroll">
+        {currentEditorItems.map((item) => (
+          <div
+            key={item.id}
+            className="border border-white/15 bg-black/30 p-5 flex items-start gap-4 hover:border-dorren-lightBlue/60 transition-colors"
+          >
+            <input
+              type="checkbox"
+              className="accent-dorren-lightBlue mt-1 shrink-0"
+              checked={editorSelectedItems.has(item.id)}
+              onChange={() => {
+                setEditorSelectedItems((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(item.id)) next.delete(item.id);
+                  else next.add(item.id);
+                  return next;
+                });
+              }}
+            />
+            <div className="flex-1 pr-4">
+              <p className="text-white font-semibold leading-snug text-sm lg:text-base">{item.name}</p>
+              <p className="text-xs text-white/60 mt-2 leading-relaxed">{item.description || item.id}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                className="w-24 bg-black border border-white/30 text-dorren-lightBlue px-3 py-2 text-right focus:border-dorren-lightBlue outline-none rounded-sm font-mono text-sm"
+                value={priceEdits[item.id] ?? item.price}
+                onChange={(e) => handlePriceInputChange(item.id, e.target.value)}
+              />
+              <span className="text-white/50 text-sm">₽</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   // --- Draft Handlers ---
   const handleSaveDraft = () => {
     const draft = {
@@ -825,6 +955,18 @@ const App: React.FC = () => {
                 <Layout size={18} />
               </div>
               <span className="hidden lg:inline text-xs uppercase tracking-widest">Шаблоны</span>
+            </button>
+
+            {/* Price Editor Button */}
+            <button 
+              onClick={() => setIsPriceEditorOpen(true)}
+              className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
+              title="Редактировать цены каталога"
+            >
+              <div className="p-2 rounded-full border border-white/10 group-hover:border-dorren-lightBlue/50 transition-colors">
+                <DollarSign size={18} />
+              </div>
+              <span className="hidden xl:inline text-xs uppercase tracking-widest">Цены</span>
             </button>
 
             {/* Convex Status Indicator */}
@@ -1268,7 +1410,72 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Info Modal */}
+
+      {/* Price Editor Modal */}
+      <Modal
+        isOpen={isPriceEditorOpen}
+        onClose={() => setIsPriceEditorOpen(false)}
+        title="РЕДАКТИРОВАНИЕ ЦЕН"
+      >
+        <div className="space-y-6 text-white">
+          <div className="flex flex-wrap gap-2">
+            {['leaf','frame','option','hardware','accessory'].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setEditorCategory(cat as any)}
+                className={`px-4 py-2 text-xs uppercase tracking-[0.25em] border transition-colors ${ editorCategory === cat ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'border-white/20 text-white/70 hover:text-white' }`}
+              >
+                {cat === 'leaf' ? 'ПОЛОТНА'
+                  : cat === 'frame' ? 'КОРОБА'
+                  : cat === 'option' ? 'ОПЦИИ'
+                  : cat === 'hardware' ? 'ФУРНИТУРА'
+                  : 'АКСЕССУАРЫ'}
+              </button>
+            ))}
+          </div>
+
+          {(editorCategory === 'leaf' || editorCategory === 'frame') && (
+            <div className="flex gap-2 text-xs uppercase tracking-[0.2em] text-white/80">
+              {DOOR_TYPES.map((type) => (
+                <button
+                  key={type.id}
+                  onClick={() => setEditorDoorType(type.id)}
+                  className={`px-4 py-2 border transition-colors rounded-sm ${ editorDoorType === type.id ? 'bg-white/10 text-white border-dorren-lightBlue' : 'border-white/10 text-white/60 hover:text-white' }`}
+                >
+                  {type.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="border-b border-white/10"></div>
+
+          <label className="flex items-center gap-2 text-sm text-white/70">
+            <input
+              type="checkbox"
+              className="accent-dorren-lightBlue"
+              onChange={toggleSelectAllEditor}
+              checked={currentEditorItems.length > 0 && currentEditorItems.every((p) => editorSelectedItems.has(p.id))}
+            />
+            Выбрать все
+          </label>
+
+          {renderPriceEditorItems()}
+
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setIsPriceEditorOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleSavePrices} disabled={isSavingPrices}>
+              {isSavingPrices ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+              Сохранить цены
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      
+{/* Info Modal */}
       <Modal
         isOpen={isInfoModalOpen}
         onClose={() => setIsInfoModalOpen(false)}
