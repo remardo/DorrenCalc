@@ -20,6 +20,7 @@ import {
   useTemplates as useTemplatesHook, 
   useDraft as useDraftHook 
 } from './src/convexAdapter';
+import { Id } from './convex/_generated/dataModel';
 
 type SortKey = 'name' | 'quantity' | 'price';
 type SortDirection = 'asc' | 'desc';
@@ -59,7 +60,8 @@ const App: React.FC = () => {
   const { 
     templates: convexTemplates,
     saveTemplate: convexSaveTemplate, 
-    deleteTemplate: convexDeleteTemplate 
+    deleteTemplate: convexDeleteTemplate,
+    updateTemplate: convexUpdateTemplate
   } = useTemplatesHook();
    
   const { 
@@ -161,6 +163,42 @@ const App: React.FC = () => {
       return null;
     }
   });
+
+  // --- Sync Convex data into UI state ---
+  useEffect(() => {
+    if (convexTemplates && Array.isArray(convexTemplates)) {
+      const normalizedTemplates: DoorTemplate[] = convexTemplates.map((template: any) => ({
+        id: String(template._id),
+        name: template.name,
+        config: {
+          doorType: template.config?.doorType as DoorType,
+          leaf: template.config?.leaf ?? null,
+          frame: template.config?.frame ?? null,
+          options: template.config?.options ?? [],
+          hardware: template.config?.hardware ?? [],
+          accessories: template.config?.accessories ?? [],
+        }
+      }));
+      setTemplates(normalizedTemplates);
+    }
+  }, [convexTemplates]);
+
+  useEffect(() => {
+    if (savedProjects && Array.isArray(savedProjects)) {
+      const normalizedProjects: SavedProject[] = savedProjects.map((project: any) => ({
+        id: String(project._id),
+        createdAt: project.createdAt ?? project._creationTime ?? Date.now(),
+        updatedAt: project.updatedAt ?? project.createdAt ?? project._creationTime ?? Date.now(),
+        name: project.name,
+        customer: project.customer,
+        manager: project.manager,
+        comments: project.comments,
+        items: project.items ?? [],
+        totalAmount: project.totalAmount,
+      }));
+      setSavedLocalProjects(normalizedProjects);
+    }
+  }, [savedProjects]);
 
   // --- Form State ---
   const [managerName, setManagerName] = useState('');
@@ -433,10 +471,6 @@ const App: React.FC = () => {
       totalAmount: projectTotal
     };
 
-    // Сохраняем в localStorage (как и раньше)
-    setSavedLocalProjects(prev => [projectToSave, ...prev]);
-    
-    // Дополнительно сохраняем в Convex (асинхронно, не блокируя UI)
     try {
       if (convexSaveProject) {
         await convexSaveProject({
@@ -447,12 +481,17 @@ const App: React.FC = () => {
           items: [...projectItems],
           totalAmount: projectTotal
         });
-        console.log('Проект сохранен в Convex');
+        console.log('Project saved to Convex');
+        setSaveSuccess(true); 
+        setTimeout(() => setSaveSuccess(false), 3000);
+        return;
       }
     } catch (error) {
-      console.error('Ошибка сохранения в Convex:', error);
+      console.error('Convex project save failed:', error);
     }
 
+    // Fallback to local state so data is not lost if Convex is unavailable
+    setSavedLocalProjects(prev => [projectToSave, ...prev]);
     setSaveSuccess(true); 
     setTimeout(() => setSaveSuccess(false), 3000);
   };
@@ -469,12 +508,22 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteProject = (id: string) => {
+  const handleDeleteProject = async (id: string) => {
     if (!id) return;
-    if (window.confirm('Удалить этот проект из архива?')) {
-      // Robust filtering: compare as strings to avoid type mismatch
-      setSavedLocalProjects(prev => prev.filter(p => String(p.id) !== String(id)));
+    if (!window.confirm('Удалить этот проект из архива?')) return;
+
+    const convexProject = savedProjects?.find(p => String(p._id) === String(id));
+    if (convexProject && convexDeleteProject) {
+      try {
+        await convexDeleteProject(convexProject._id as Id<"projects">);
+        return;
+      } catch (error) {
+        console.error('Ошибка удаления в Convex:', error);
+      }
     }
+
+    // Fallback cleanup if Convex call is unavailable
+    setSavedLocalProjects(prev => prev.filter(p => String(p.id) !== String(id)));
   };
 
   // --- Template Handlers ---
@@ -485,15 +534,24 @@ const App: React.FC = () => {
     setIsSaveTemplateModalOpen(true);
   };
 
-  const handleSaveTemplate = () => {
+  const handleSaveTemplate = async () => {
     if (!templateNameInput.trim()) return;
 
     if (templateToRenameId) {
-        setTemplates(prev => prev.map(t => t.id === templateToRenameId ? { ...t, name: templateNameInput } : t));
+      try {
+        await convexUpdateTemplate(templateToRenameId as Id<"templates">, templateNameInput.trim());
         setTemplateToRenameId(null);
         setIsSaveTemplateModalOpen(false);
         setIsTemplateManagerOpen(true); 
         return;
+      } catch (error) {
+        console.error('Ошибка переименования шаблона в Convex:', error);
+        setTemplates(prev => prev.map(t => t.id === templateToRenameId ? { ...t, name: templateNameInput } : t));
+        setTemplateToRenameId(null);
+        setIsSaveTemplateModalOpen(false);
+        setIsTemplateManagerOpen(true);
+        return;
+      }
     }
 
     const newTemplate: DoorTemplate = {
@@ -508,26 +566,23 @@ const App: React.FC = () => {
         accessories: [...selectedAccessories]
       }
     };
-    setTemplates([...templates, newTemplate]);
     
-    // Также сохраняем в Convex
-    if (convexSaveTemplate) {
-      try {
-        convexSaveTemplate({
-          name: templateNameInput,
-          config: {
-            doorType: activeTab,
-            leaf: selectedLeaf,
-            frame: selectedFrame,
-            options: [...selectedOptions],
-            hardware: [...selectedHardware],
-            accessories: [...selectedAccessories]
-          }
-        });
-        console.log('Шаблон сохранен в Convex');
-      } catch (error) {
-        console.error('Ошибка сохранения шаблона в Convex:', error);
-      }
+    try {
+      await convexSaveTemplate({
+        name: templateNameInput,
+        config: {
+          doorType: activeTab,
+          leaf: selectedLeaf,
+          frame: selectedFrame,
+          options: [...selectedOptions],
+          hardware: [...selectedHardware],
+          accessories: [...selectedAccessories]
+        }
+      });
+      console.log('Шаблон сохранен в Convex');
+    } catch (error) {
+      console.error('Ошибка сохранения шаблона в Convex:', error);
+      setTemplates([...templates, newTemplate]);
     }
     
     setIsSaveTemplateModalOpen(false);
@@ -548,8 +603,18 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDeleteTemplate = (id: string) => {
-    setTemplates(templates.filter(t => t.id !== id));
+  const handleDeleteTemplate = async (id: string) => {
+    if (!id) return;
+    try {
+      if (convexDeleteTemplate) {
+        await convexDeleteTemplate(id as Id<"templates">);
+        return;
+      }
+    } catch (error) {
+      console.error('Ошибка удаления шаблона в Convex:', error);
+    }
+
+    setTemplates(prev => prev.filter(t => t.id !== id));
   };
 
   const handleStartRenameTemplate = (template: DoorTemplate) => {
