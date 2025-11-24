@@ -77,7 +77,6 @@ const App: React.FC = () => {
   } = useProductsHook();
 
   const hasSeededProductsRef = useRef(false);
-  const hasSyncedCatalogPricesRef = useRef(false);
   
   // --- Catalog State (Initialized from data.ts but mutable) ---
   const [catalogLeafs, setCatalogLeafs] = useState(LEAFS);
@@ -382,28 +381,6 @@ const App: React.FC = () => {
   };
 
 
-  // Sync UI catalog prices to Convex once when data is available
-  useEffect(() => {
-    if (hasSyncedCatalogPricesRef.current) return;
-    if (convexProducts === undefined) return; // wait for query resolution
-
-    // Take current in-memory catalog (including any price edits) and push to Convex
-    const currentCatalogProducts: any[] = [
-      ...Object.entries(catalogLeafs).flatMap(([doorType, items]) =>
-        (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
-      ),
-      ...Object.entries(catalogFrames).flatMap(([doorType, items]) =>
-        (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
-      ),
-      ...catalogOptions.map((p) => ({ ...p, isActive: true })),
-      ...catalogHardware.map((p) => ({ ...p, isActive: true })),
-      ...catalogAccessories.map((p) => ({ ...p, isActive: true })),
-    ];
-
-    convexBulkUpsertProducts(currentCatalogProducts)
-      .catch((err) => console.error('Failed to sync catalog prices to Convex', err))
-      .finally(() => { hasSyncedCatalogPricesRef.current = true; });
-  }, [convexProducts, catalogLeafs, catalogFrames, catalogOptions, catalogHardware, catalogAccessories, convexBulkUpsertProducts]);
 const toggleSelectAllEditor = () => {
     const allIds = currentEditorItems.map((p) => p.id);
     const allSelected = allIds.every((id) => editorSelectedItems.has(id));
