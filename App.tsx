@@ -76,7 +76,7 @@ const App: React.FC = () => {
     bulkUpsertProducts: convexBulkUpsertProducts,
   } = useProductsHook();
 
-  const hasSeededProductsRef = useRef(false);
+  const hasLocalPriceChangesRef = useRef(false);
   
   // --- Catalog State (Initialized from data.ts but mutable) ---
   const [catalogLeafs, setCatalogLeafs] = useState(LEAFS);
@@ -285,22 +285,11 @@ const App: React.FC = () => {
     return seed;
   };
 
-  // Seed Convex products with default catalog if empty
-  useEffect(() => {
-    if (!convexProducts || convexProducts === undefined) return;
-    if (convexProducts.length > 0) return;
-    if (hasSeededProductsRef.current) return;
-    hasSeededProductsRef.current = true;
-    const seed = buildSeedProducts();
-    convexBulkUpsertProducts(seed).catch(err => {
-      console.error('Failed to seed products to Convex', err);
-      hasSeededProductsRef.current = false;
-    });
-  }, [convexProducts, convexBulkUpsertProducts]);
-
   // Pull active products from Convex into local catalogs
   useEffect(() => {
     if (!convexProducts || convexProducts.length === 0) return;
+    if (isPriceEditorOpen) return; // do not override local edits while editor is open
+    if (hasLocalPriceChangesRef.current) return; // preserve unsaved local edits
 
     const leafsByDoor: Record<DoorType, ProductItem[]> = {
       single: [],
@@ -347,14 +336,25 @@ const App: React.FC = () => {
     setCatalogOptions(optionsList);
     setCatalogHardware(hardwareList);
     setCatalogAccessories(accessoriesList);
-  }, [convexProducts]);
+
+  }, [convexProducts, isPriceEditorOpen]);
 
   // Build updated product list with edited prices for saving to Convex
-  const buildUpdatedProductsForSave = () => {
-    const base = (convexProducts && convexProducts.length > 0)
-      ? convexProducts
-      : buildSeedProducts();
-    return base.map((p: any) => ({
+  const buildCatalogProductsForSave = () => {
+    const leafs = Object.entries(catalogLeafs).flatMap(([doorType, items]) =>
+      (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
+    );
+    const frames = Object.entries(catalogFrames).flatMap(([doorType, items]) =>
+      (items as ProductItem[]).map((p) => ({ ...p, doorType, isActive: true }))
+    );
+    const flats = [
+      ...catalogOptions.map((p) => ({ ...p, isActive: true })),
+      ...catalogHardware.map((p) => ({ ...p, isActive: true })),
+      ...catalogAccessories.map((p) => ({ ...p, isActive: true })),
+    ];
+
+    const all = [...leafs, ...frames, ...flats];
+    return all.map((p) => ({
       ...p,
       price: priceEdits[p.id] ?? p.price,
     }));
@@ -363,8 +363,22 @@ const App: React.FC = () => {
   const handleSavePrices = async () => {
     setIsSavingPrices(true);
     try {
-      const payload = buildUpdatedProductsForSave();
+      const payload = buildCatalogProductsForSave();
       await convexBulkUpsertProducts(payload);
+      // sync local catalog with saved prices
+      const applyPrices = (items: ProductItem[]) =>
+        items.map((p) => ({ ...p, price: priceEdits[p.id] ?? p.price }));
+      const applyBucket = (bucket: Record<DoorType, ProductItem[]>) => ({
+        single: applyPrices(bucket.single),
+        one_half: applyPrices(bucket.one_half),
+        double: applyPrices(bucket.double),
+      });
+      setCatalogLeafs((prev) => applyBucket(prev));
+      setCatalogFrames((prev) => applyBucket(prev));
+      setCatalogOptions((prev) => applyPrices(prev));
+      setCatalogHardware((prev) => applyPrices(prev));
+      setCatalogAccessories((prev) => applyPrices(prev));
+      hasLocalPriceChangesRef.current = false;
       setIsPriceEditorOpen(false);
     } catch (error) {
       console.error('Failed to save prices to Convex', error);
@@ -373,19 +387,20 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePriceInputChange = (id: string, value: string) => {
-    const normalized = value.replace(',', '.');
-    const num = parseFloat(normalized);
-    if (Number.isNaN(num)) return;
-    setPriceEdits((prev) => ({ ...prev, [id]: num }));
-  };
+const handlePriceInputChange = (id: string, value: string) => {
+  const normalized = value.replace(',', '.');
+  const num = parseFloat(normalized);
+  if (Number.isNaN(num)) return;
+  hasLocalPriceChangesRef.current = true;
+  setPriceEdits((prev) => ({ ...prev, [id]: num }));
+};
 
 
 const toggleSelectAllEditor = () => {
-    const allIds = currentEditorItems.map((p) => p.id);
-    const allSelected = allIds.every((id) => editorSelectedItems.has(id));
-    if (allSelected) {
-      setEditorSelectedItems(new Set());
+  const allIds = currentEditorItems.map((p) => p.id);
+  const allSelected = allIds.every((id) => editorSelectedItems.has(id));
+  if (allSelected) {
+    setEditorSelectedItems(new Set());
     } else {
       setEditorSelectedItems(new Set(allIds));
     }
