@@ -11,7 +11,7 @@ import {
   CheckCircle, Edit3, XCircle, Save, ArrowUp, ArrowDown, ArrowUpDown, Layout, 
   Bookmark, Play, CheckSquare, Square, Percent, DollarSign, PlusCircle, MinusCircle, 
   RotateCcw, FileX, Download, FolderOpen, Calendar, User, Briefcase, HardDrive, RefreshCw,
-  Maximize2, Shield, Eye, Zap, Lock, Move, LogOut, Gem, DoorOpen
+  Maximize2, Shield, Eye, Zap, Lock, Move, LogOut, Gem, DoorOpen, Sun, Moon
 } from 'lucide-react';
 import { calculateItemTotal, calculateProjectTotal } from './priceCalculator';
 import { generatePDF } from './pdfGenerator';
@@ -30,6 +30,8 @@ interface SortConfig {
   key: SortKey;
   direction: SortDirection;
 }
+
+type ThemeMode = 'dark' | 'light';
 
 // Helper for item icons outside component to prevent re-renders
 const getItemIcon = (category: string, id: string) => {
@@ -96,6 +98,16 @@ const App: React.FC = () => {
   const [configDiscountValue, setConfigDiscountValue] = useState('');
   const [configDiscountType, setConfigDiscountType] = useState<'percent' | 'fixed'>('percent');
 
+  // --- Theme State ---
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dorren_theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+      if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
+    }
+    return 'dark';
+  });
+
   // --- Project State ---
   const [projectItems, setProjectItems] = useState<DoorConfig[]>([]);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -148,6 +160,18 @@ const App: React.FC = () => {
   
   const [isProjectsModalOpen, setIsProjectsModalOpen] = useState(false);
   const [priceEdits, setPriceEdits] = useState<Record<string, number>>({});
+  const [doorHeight, setDoorHeight] = useState(2200);
+  const [doorWidth, setDoorWidth] = useState(800);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.dataset.theme = theme;
+      document.documentElement.dataset.theme = theme;
+      document.body.classList.remove('theme-dark', 'theme-light');
+      document.body.classList.add(theme === 'dark' ? 'theme-dark' : 'theme-light');
+    }
+    localStorage.setItem('dorren_theme', theme);
+  }, [theme]);
 
   // --- Draft State (локальное хранение) ---
   const [draftConfig, setDraftConfig] = useState<{
@@ -523,6 +547,8 @@ const toggleSelectAllEditor = () => {
             doorType: activeTab,
             leaf: selectedLeaf,
             frame: selectedFrame,
+            height: doorHeight,
+            width: doorWidth,
             options: [...selectedOptions],
             hardware: [...selectedHardware],
             accessories: [...selectedAccessories],
@@ -547,6 +573,8 @@ const toggleSelectAllEditor = () => {
         doorType: activeTab,
         leaf: selectedLeaf,
         frame: selectedFrame,
+        height: doorHeight,
+        width: doorWidth,
         options: [...selectedOptions],
         hardware: [...selectedHardware],
         accessories: [...selectedAccessories],
@@ -565,6 +593,8 @@ const toggleSelectAllEditor = () => {
     setSelectedHardware([...item.hardware]);
     setSelectedAccessories(item.accessories ? [...item.accessories] : []);
     setConfigQuantity(item.quantity);
+    setDoorHeight(item.height || 2200);
+    setDoorWidth(item.width || 800);
     
     if (item.discount) {
         setConfigDiscountValue(item.discount.value.toString());
@@ -597,6 +627,8 @@ const toggleSelectAllEditor = () => {
     setSelectedOptions([]);
     setSelectedHardware([]);
     setSelectedAccessories([]);
+    setDoorHeight(2200);
+    setDoorWidth(800);
     setConfigQuantity(1);
     setConfigDiscountValue('');
     setConfigDiscountType('percent');
@@ -908,10 +940,38 @@ const toggleSelectAllEditor = () => {
     }
   };
 
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const handleGeneratePDF = async () => {
+    if (projectItems.length === 0) return;
+    setErrorMsg(null);
+    setPdfSuccess(false);
+    setIsGenerating(true);
+    try {
+      await generatePDF({
+        projectItems,
+        projectName: projectName || 'Без названия',
+        customerName: customerName || 'Не указан',
+        managerName: managerName || 'Не указан',
+        comments,
+        projectTotal
+      });
+      setPdfSuccess(true);
+      setTimeout(() => setPdfSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to generate PDF', error);
+      setErrorMsg('Не удалось сформировать PDF');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const formatPrice = (p: number) => p.toLocaleString('ru-RU');
   
   return (
-    <div className="min-h-screen bg-dorren-black text-white font-sans selection:bg-dorren-lightBlue selection:text-dorren-black pb-32">
+    <div className={`min-h-screen font-sans selection:bg-dorren-lightBlue selection:text-dorren-black pb-32 ${theme === 'dark' ? 'bg-dorren-black text-white theme-dark' : 'bg-slate-50 text-slate-900 theme-light'}`}>
        
       {/* Background Decorative Lines */}
       <div className="fixed inset-0 pointer-events-none z-0 opacity-10">
@@ -920,16 +980,30 @@ const toggleSelectAllEditor = () => {
       </div>
 
       {/* Header */}
-      <header className="relative z-50 pt-8 pb-8 px-4 md:px-8 border-b border-white/10 bg-dorren-black sticky top-0">
+      <header className={`relative z-50 pt-8 pb-8 px-4 md:px-8 sticky top-0 ${theme === 'dark' ? 'border-b border-white/10 bg-dorren-black' : 'bg-white/90 border-b border-slate-200 backdrop-blur'}`}>
         <div className="max-w-[1600px] mx-auto flex justify-between items-center">
           <Logo />
           <div className="flex items-center gap-4 md:gap-6">
+            
+            {/* Theme Toggle */}
+            <button 
+              onClick={toggleTheme}
+              className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
+              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            >
+              <div className={`p-2 rounded-full border transition-colors ${theme === 'dark' ? 'border-white/10 group-hover:border-dorren-lightBlue/50' : 'border-slate-200 bg-white group-hover:border-dorren-lightBlue/50'}`}>
+                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              </div>
+              <span className="hidden xl:inline text-xs uppercase tracking-widest">
+                {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              </span>
+            </button>
             
             {/* Projects Archive Button */}
             <button 
               onClick={() => setIsProjectsModalOpen(true)}
               className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
-              title="Архив проектов"
+              title="Открыть проекты"
             >
               <div className="p-2 rounded-full border border-white/10 group-hover:border-dorren-lightBlue/50 transition-colors">
                 <FolderOpen size={18} />
@@ -941,7 +1015,7 @@ const toggleSelectAllEditor = () => {
             <button 
               onClick={() => setIsTemplateManagerOpen(true)}
               className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
-              title="Шаблоны конфигураций"
+              title="Управление шаблонами"
             >
               <div className="p-2 rounded-full border border-white/10 group-hover:border-dorren-lightBlue/50 transition-colors">
                 <Layout size={18} />
@@ -953,10 +1027,10 @@ const toggleSelectAllEditor = () => {
             <button 
               onClick={() => setIsPriceEditorOpen(true)}
               className="group flex items-center gap-2 text-white/40 hover:text-dorren-lightBlue transition-colors"
-              title="Редактировать цены каталога"
+              title="Редактировать цены"
             >
               <div className="p-2 rounded-full border border-white/10 group-hover:border-dorren-lightBlue/50 transition-colors">
-                <DollarSign size={18} />
+                <span className="text-sm font-semibold">₽</span>
               </div>
               <span className="hidden xl:inline text-xs uppercase tracking-widest">Цены</span>
             </button>
@@ -1114,43 +1188,6 @@ const toggleSelectAllEditor = () => {
           {/* RIGHT COLUMN: Summary Sticky */}
           <div className="lg:col-span-4 relative h-full">
             <div className="sticky top-32 flex flex-col gap-0 max-h-[calc(100vh-9rem)] overflow-y-auto pr-1">
-               
-               {/* Project Metadata Inputs */}
-               <div className="bg-dorren-darkBlue/20 border border-dorren-darkBlue p-6 mb-4 backdrop-blur-sm">
-                  <h3 className="text-xs uppercase tracking-widest text-white/40 mb-4">Данные проекта</h3>
-                  <div className="space-y-3">
-                      <div className="space-y-1">
-                         <label className="text-[10px] text-white/30 uppercase tracking-wider">Проект</label>
-                         <input 
-                            type="text" 
-                            placeholder="Название проекта"
-                            value={projectName}
-                            onChange={(e) => setProjectName(e.target.value)}
-                            className="w-full bg-dorren-black border border-dorren-darkBlue p-3 text-sm text-white focus:border-dorren-lightBlue outline-none placeholder:text-white/20 transition-colors"
-                         />
-                      </div>
-                      <div className="space-y-1">
-                         <label className="text-[10px] text-white/30 uppercase tracking-wider">Заказчик</label>
-                         <input 
-                            type="text" 
-                            placeholder="Заказчик"
-                            value={customerName}
-                            onChange={(e) => setCustomerName(e.target.value)}
-                            className="w-full bg-dorren-black border border-dorren-darkBlue p-3 text-sm text-white focus:border-dorren-lightBlue outline-none placeholder:text-white/20 transition-colors"
-                         />
-                      </div>
-                      <div className="space-y-1">
-                         <label className="text-[10px] text-white/30 uppercase tracking-wider">Менеджер</label>
-                         <input 
-                            type="text" 
-                            placeholder="Менеджер"
-                            value={managerName}
-                            onChange={(e) => setManagerName(e.target.value)}
-                            className="w-full bg-dorren-black border border-dorren-darkBlue p-3 text-sm text-white focus:border-dorren-lightBlue outline-none placeholder:text-white/20 transition-colors"
-                         />
-                      </div>
-                  </div>
-               </div>
 
                {/* Configuration Card */}
                <div className={`
@@ -1220,7 +1257,37 @@ const toggleSelectAllEditor = () => {
                      </div>
                  </div>
 
+                 <div className="grid grid-cols-2 gap-3 mb-6">
+                   <div>
+                     <label className="text-[10px] text-white/40 uppercase tracking-wider">Высота, мм</label>
+                     <input
+                       type="number"
+                       min={1}
+                       value={doorHeight}
+                       onChange={(e) => setDoorHeight(Number(e.target.value) || 0)}
+                       className="mt-1 w-full bg-dorren-black border border-dorren-darkBlue p-3 text-sm text-white focus:border-dorren-lightBlue outline-none"
+                     />
+                   </div>
+                   <div>
+                     <label className="text-[10px] text-white/40 uppercase tracking-wider">Ширина, мм</label>
+                     <input
+                       type="number"
+                       min={1}
+                       value={doorWidth}
+                       onChange={(e) => setDoorWidth(Number(e.target.value) || 0)}
+                       className="mt-1 w-full bg-dorren-black border border-dorren-darkBlue p-3 text-sm text-white focus:border-dorren-lightBlue outline-none"
+                     />
+                   </div>
+                 </div>
+
                  <div className="space-y-4 mb-8 text-sm">
+                   <div className="flex justify-between items-start">
+                     <span className="text-white/40">Высота и ширина</span>
+                     <span className="text-right max-w-[60%]" title="Размеры по умолчанию">
+                       {doorHeight} x {doorWidth}
+                     </span>
+                   </div>
+
                    <div className="flex justify-between items-start">
                      <span className="text-white/40">Тип блока</span>
                      <span className="text-right max-w-[60%]">{DOOR_TYPES.find(t => t.id === activeTab)?.label}</span>
@@ -1246,7 +1313,7 @@ const toggleSelectAllEditor = () => {
                        {[...selectedOptions, ...selectedHardware, ...selectedAccessories].map(opt => (
                          <div key={opt.id} className="flex justify-between text-xs">
                            <span className="text-white/70">{opt.name}</span>
-                           <span className="text-white/40">{formatPrice(opt.price)} ₽</span>
+                            <span className="text-white/40">{formatPrice(opt.price)} ₽</span>
                          </div>
                        ))}
                      </div>
@@ -1256,7 +1323,7 @@ const toggleSelectAllEditor = () => {
                  <div className="bg-dorren-black/50 p-4 border border-white/5 mb-6">
                    <div className="flex justify-between items-end mb-1">
                      <span className="text-xs uppercase tracking-widest text-white/60">Цена за шт.</span>
-                     <span className="text-xl font-mono text-white">{formatPrice(currentConfigCost)} ₽</span>
+                    <span className="text-xl font-mono text-white">{formatPrice(currentConfigCost)} ₽</span>
                    </div>
                  </div>
 
@@ -1295,7 +1362,7 @@ const toggleSelectAllEditor = () => {
                                <button 
                                  onClick={() => setConfigDiscountType('fixed')}
                                  className={`p-1 ${configDiscountType === 'fixed' ? 'bg-white/20 text-white' : 'text-white/40'}`}
-                               ><DollarSign size={14} /></button>
+                                ><span className="px-1 text-sm">₽</span></button>
                             </div>
                          </div>
                      </div>
@@ -1306,11 +1373,11 @@ const toggleSelectAllEditor = () => {
                        <div className="flex flex-col items-end">
                           {configDiscountValue && (
                              <span className="text-xs text-white/30 line-through font-mono">
-                                {formatPrice(currentConfigCost * configQuantity)} ₽
+                             {formatPrice(currentConfigCost * configQuantity)} ₽
                              </span>
                           )}
                           <span className="text-lg font-mono text-white">
-                             {formatPrice(currentConfigTotal)} ₽
+                              {formatPrice(currentConfigTotal)} ₽
                           </span>
                        </div>
                  </div>
@@ -1353,18 +1420,22 @@ const toggleSelectAllEditor = () => {
                  <div className="mt-8">
                    <h3 className="text-xs uppercase tracking-widest text-white/40 mb-4">Состав проекта</h3>
                    <div className="space-y-3">
-                     {projectItems.map((item, idx) => (
-                       <div key={item.id} className={`
-                         flex justify-between items-center text-xs p-3 border transition-colors cursor-pointer group
-                         ${editingItemId === item.id 
-                           ? 'bg-dorren-lightBlue/20 border-dorren-lightBlue' 
-                           : 'bg-white/5 border-white/5 hover:border-dorren-lightBlue/30'
-                         }
-                       `}>
-                         <div>
-                           <span className="text-dorren-lightBlue mr-2 font-mono">#{idx + 1}</span>
-                           <span className="text-white/80">{item.leaf?.name.substring(0, 20)}...</span>
-                         </div>
+                      {projectItems.map((item, idx) => (
+                        <div 
+                          key={item.id} 
+                          className={`
+                          flex justify-between items-center text-xs p-3 border transition-colors cursor-pointer group
+                          ${editingItemId === item.id 
+                            ? 'bg-dorren-lightBlue/20 border-dorren-lightBlue' 
+                            : 'bg-white/5 border-white/5 hover:border-dorren-lightBlue/30'
+                          }
+                        `}
+                          onClick={() => handleEditItem(item)}
+                        >
+                          <div>
+                            <span className="text-dorren-lightBlue mr-2 font-mono">#{idx + 1}</span>
+                            <span className="text-white/80" title={item.leaf?.name || ''}>{item.leaf?.name.substring(0, 20)}...</span>
+                          </div>
                          <div className="flex items-center gap-3">
                            <span className="font-mono">{item.quantity} шт</span>
                            
@@ -1410,12 +1481,12 @@ const toggleSelectAllEditor = () => {
         title="РЕДАКТИРОВАНИЕ ЦЕН"
       >
         <div className="space-y-6 text-white">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-nowrap gap-2 overflow-x-auto pb-2">
             {['leaf','frame','option','hardware','accessory'].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setEditorCategory(cat as any)}
-                className={`px-4 py-2 text-xs uppercase tracking-[0.25em] border transition-colors ${ editorCategory === cat ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'border-white/20 text-white/70 hover:text-white' }`}
+                className={`px-4 py-2 text-xs uppercase tracking-[0.25em] border transition-colors whitespace-nowrap ${ editorCategory === cat ? 'bg-dorren-lightBlue text-dorren-black border-dorren-lightBlue' : 'border-white/20 text-white/70 hover:text-white' }`}
               >
                 {cat === 'leaf' ? 'ПОЛОТНА'
                   : cat === 'frame' ? 'КОРОБА'
@@ -1548,7 +1619,7 @@ const toggleSelectAllEditor = () => {
 
                        <div className="text-right">
                           <div className="text-xl font-mono text-dorren-lightBlue mb-3">
-                             {formatPrice(project.totalAmount)} ₽
+                            {formatPrice(project.totalAmount)} ₽
                           </div>
                           <div className="flex gap-2 justify-end">
                              <Button 
@@ -1715,6 +1786,11 @@ const toggleSelectAllEditor = () => {
                                 <div className="flex flex-col gap-1">
                                   <span className="font-medium text-white">{item.leaf?.name}</span>
                                   <span className="text-xs text-white/60">{item.frame?.name}</span>
+                                  {(item.height || item.width) && (
+                                    <span className="text-[10px] text-white/50">
+                                      Размер: {item.height || '—'} x {item.width || '—'}
+                                    </span>
+                                  )}
                                   {(item.options.length > 0 || item.hardware.length > 0 || (item.accessories && item.accessories.length > 0)) && (
                                     <div className="flex flex-wrap gap-1 mt-1">
                                       {[...item.options, ...item.hardware, ...(item.accessories || [])].map(opt => (
@@ -1726,7 +1802,7 @@ const toggleSelectAllEditor = () => {
                                   )}
                                   {item.discount && (
                                      <div className="text-[10px] text-dorren-lightBlue mt-1">
-                                        СКИДКА: {item.discount.type === 'percent' ? `${item.discount.value}%` : `${item.discount.value} ₽`}
+                                        СКИДКА: {item.discount.type === 'percent' ? `${item.discount.value}%` : `${item.discount.value} ?`}
                                      </div>
                                   )}
                                 </div>
@@ -1774,11 +1850,11 @@ const toggleSelectAllEditor = () => {
             </Button>
             <Button 
               className="flex-1 transition-all duration-300"
-              onClick={() => {}}
-              disabled={true}
+              onClick={handleGeneratePDF}
+              disabled={projectItems.length === 0 || isGenerating}
             >
-              <FileDown className="mr-2" size={18} />
-              Формирование КП (скоро)
+              {isGenerating ? <Loader2 className="mr-2 animate-spin" size={18} /> : <FileDown className="mr-2" size={18} />}
+              {isGenerating ? 'Формируем КП...' : 'Скачать КП (PDF)'}
             </Button>
           </div>
         </div>
@@ -1788,3 +1864,5 @@ const toggleSelectAllEditor = () => {
 };
 
 export default App;
+
+

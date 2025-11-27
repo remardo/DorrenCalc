@@ -43,6 +43,21 @@ export const generatePDF = async ({
   projectTotal
 }: PDFGeneratorProps) => {
   const doc = new jsPDF();
+  // Patch addPage to always paint background and header for new pages
+  const originalAddPage = doc.addPage.bind(doc);
+  const paintPageChrome = () => {
+    doc.setFillColor(bgBlack);
+    doc.rect(0, 0, pageWidth, pageHeight, 'F');
+    doc.setTextColor(textWhite);
+    doc.setFontSize(24);
+    doc.text('DORREN', 15, 20);
+    doc.setDrawColor(accentBlue);
+    doc.setLineWidth(0.5);
+    doc.line(15, 22, 50, 22);
+    doc.setFontSize(8);
+    doc.setTextColor(accentBlue);
+    doc.text('Профессиональные дверные решения', 15, 26);
+  };
   const vatRate = 0.2;
   const vatAmount = Math.round(projectTotal * vatRate);
   const totalWithVat = projectTotal + vatAmount;
@@ -60,9 +75,18 @@ export const generatePDF = async ({
   const textWhite = '#FFFFFF';
   const accentBlue = '#85CEE4';
   const darkBlue = '#183141';
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
 
   doc.setFillColor(bgBlack);
-  doc.rect(0, 0, 210, 297, 'F');
+  doc.rect(0, 0, pageWidth, pageHeight, 'F');
+  // Override addPage to auto-paint background + header
+  // @ts-ignore override
+  doc.addPage = (...args: any[]) => {
+    const res = originalAddPage(...args);
+    paintPageChrome();
+    return res;
+  };
 
   doc.setTextColor(textWhite);
   doc.setFontSize(24);
@@ -128,8 +152,12 @@ export const generatePDF = async ({
     typeItems.forEach(item => {
       const leafName = item.leaf?.name || 'Полотно не выбрано';
       const frameName = item.frame?.name || 'Короб не выбран';
+      const sizeText = item.height && item.width ? `Размер: ${item.height} x ${item.width}` : '';
 
       let details = `${frameName}`;
+      if (sizeText) {
+        details += `\n${sizeText}`;
+      }
       const extras = [...item.options, ...item.hardware, ...(item.accessories || [])];
       if (extras.length > 0) {
         details += `\n${extras.map(e => `• ${e.name}`).join('\n')}`;
@@ -169,6 +197,7 @@ export const generatePDF = async ({
     head: [['Описание / комплектация', 'Кол-во', 'Итого']],
     body: tableBody,
     theme: 'grid',
+    margin: { top: 30 },
     styles: {
       font: 'ArialLocal',
       fontStyle: 'normal',
@@ -193,6 +222,10 @@ export const generatePDF = async ({
     },
     alternateRowStyles: {
       fillColor: '#080808'
+    },
+    didDrawPage: () => {
+      // Ensure text color reset on each page for any following content
+      doc.setTextColor(textWhite);
     }
   });
 

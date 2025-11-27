@@ -40,6 +40,12 @@
         background-color: #000000;
         color: #ffffff;
       }
+
+      body[data-theme="light"] {
+        background-color: #f6f8fb;
+        color: #0f172a;
+      }
+
       /* Custom scrollbar for a sleeker look */
       ::-webkit-scrollbar {
         width: 8px;
@@ -53,6 +59,16 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #85CEE4;
+      }
+
+      body[data-theme="light"] ::-webkit-scrollbar-track {
+        background: #e5ecf3;
+      }
+      body[data-theme="light"] ::-webkit-scrollbar-thumb {
+        background: #c3d3e4;
+      }
+      body[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+        background: #85cee4;
       }
     </style>
   <script type="importmap">

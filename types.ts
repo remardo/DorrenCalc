@@ -17,6 +17,8 @@ export interface DoorConfig {
   doorType: DoorType;
   leaf: ProductItem | null;
   frame: ProductItem | null;
+  height?: number;
+  width?: number;
   options: ProductItem[];
   hardware: ProductItem[];
   accessories: ProductItem[];
